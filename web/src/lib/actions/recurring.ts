@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { recurringRuleSchema } from '@/lib/validations/recurring'
 import { requireUser } from './helpers'
 import { formatZodErrors } from '@/lib/utils'
-import { toISODate, addMonths, getPeriodStart } from './dates'
+import { toISODate, addMonths } from './dates'
 import { recalcObligation } from '@/lib/utils'
 import type { RecurringRule, ObligationInsert } from '@/lib/types'
 
@@ -15,7 +15,7 @@ type ActionResult =
 
 export async function getRecurringRules(): Promise<RecurringRule[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('recurring_rules')
     .select('*')
@@ -29,7 +29,7 @@ export async function getRecurringRules(): Promise<RecurringRule[]> {
 
 export async function getRecurringRulesForProperty(propertyId: string): Promise<RecurringRule[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('recurring_rules')
     .select('*')
@@ -44,7 +44,7 @@ export async function getRecurringRulesForProperty(propertyId: string): Promise<
 
 export async function getRecurringRule(id: string): Promise<RecurringRule | null> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('recurring_rules')
     .select('*')
@@ -64,7 +64,7 @@ export async function createRecurringRule(formData: FormData): Promise<ActionRes
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('recurring_rules')
@@ -74,15 +74,16 @@ export async function createRecurringRule(formData: FormData): Promise<ActionRes
 
   if (error) return { error: error.message }
 
+  let generated = 0
   if (data) {
-    await generateObligationsForRule(data as RecurringRule)
+    generated = await generateObligationsForRule(data as RecurringRule)
   }
 
   revalidatePath('/recurring')
   revalidatePath('/obligations')
   revalidatePath('/dashboard')
   revalidatePath(`/properties/${parsed.data.property_id}`)
-  return { success: true, generated: 0 }
+  return { success: true, generated }
 }
 
 export async function updateRecurringRule(id: string, formData: FormData): Promise<ActionResult> {
@@ -92,7 +93,17 @@ export async function updateRecurringRule(id: string, formData: FormData): Promi
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
+
+  const { data: current, error: fetchError } = await supabase
+    .from('recurring_rules')
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .single()
+    .returns<RecurringRule>()
+
+  if (fetchError || !current) return { error: fetchError?.message ?? 'Recurring rule not found' }
 
   const { error } = await supabase
     .from('recurring_rules')
@@ -102,17 +113,37 @@ export async function updateRecurringRule(id: string, formData: FormData): Promi
 
   if (error) return { error: error.message }
 
+  // Reconcile future unpaid obligations against the updated rule.
+  // Historical obligations and obligations with payments are left untouched.
+  const today = toISODate(new Date())
+  await supabase
+    .from('obligations')
+    .delete()
+    .eq('recurring_rule_id', id)
+    .eq('user_id', user.id)
+    .gte('due_date', today)
+    .eq('paid_amount', 0)
+
+  let generated = 0
+  const updated = { ...current, ...parsed.data }
+  if (updated.active) {
+    generated = await generateObligationsForRule(updated, today)
+  }
+
   revalidatePath('/recurring')
   revalidatePath('/obligations')
   revalidatePath('/dashboard')
   revalidatePath(`/recurring/${id}`)
-  revalidatePath(`/properties/${parsed.data.property_id}`)
-  return { success: true }
+  revalidatePath(`/properties/${updated.property_id}`)
+  if (current.property_id !== updated.property_id) {
+    revalidatePath(`/properties/${current.property_id}`)
+  }
+  return { success: true, generated }
 }
 
 export async function deleteRecurringRule(id: string): Promise<ActionResult> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: rule } = await supabase
     .from('recurring_rules')
@@ -135,14 +166,14 @@ export async function deleteRecurringRule(id: string): Promise<ActionResult> {
   return { success: true }
 }
 
-export async function generateObligationsForRule(rule: RecurringRule): Promise<number> {
-  const supabase = createClient()
-  const user = await requireUser()
+export async function generateObligationsForRule(
+  rule: RecurringRule,
+  fromDate?: string
+): Promise<number> {
+  if (!rule.active) return 0
 
-  const start = new Date(rule.start_date)
-  const horizon = addMonths(new Date(), 12)
-  const end = rule.end_date ? new Date(rule.end_date) : horizon
-  const limit = end < horizon ? end : horizon
+  const user = await requireUser()
+  const supabase = await createClient()
 
   const monthsToAdd =
     rule.frequency === 'monthly'
@@ -153,16 +184,26 @@ export async function generateObligationsForRule(rule: RecurringRule): Promise<n
       ? 6
       : 12
 
+  const start = new Date(`${rule.start_date}T00:00:00Z`)
+  const horizon = addMonths(new Date(), 12)
+  const end = rule.end_date ? new Date(`${rule.end_date}T00:00:00Z`) : horizon
+  const limit = end < horizon ? end : horizon
+  const limitDate = toISODate(limit)
+
+  const startDate = toISODate(start)
+  const minDate = fromDate && fromDate > startDate ? fromDate : startDate
+
+  let cursor = new Date(`${rule.start_date}T00:00:00Z`)
+  let dueDate = computeDueDate(cursor, rule.day_of_month)
+
+  // Advance cursor until the due date is on or after the rule's start date.
+  while (dueDate < startDate) {
+    cursor = addMonths(cursor, monthsToAdd)
+    dueDate = computeDueDate(cursor, rule.day_of_month)
+  }
+
   const generated: ObligationInsert[] = []
-  let cursor = new Date(start)
-
-  while (cursor <= limit) {
-    const year = cursor.getUTCFullYear()
-    const month = cursor.getUTCMonth()
-    const day = Math.min(rule.day_of_month, daysInMonth(year, month))
-    const dueDate = new Date(Date.UTC(year, month, day))
-    const periodStart = getPeriodStart(rule.frequency, year, month)
-
+  while (dueDate <= limitDate && dueDate >= minDate) {
     const obligation: ObligationInsert = {
       user_id: user.id,
       property_id: rule.property_id,
@@ -174,37 +215,43 @@ export async function generateObligationsForRule(rule: RecurringRule): Promise<n
       description: rule.description ?? `${rule.category.replace(/_/g, ' ')} (${rule.frequency})`,
       expected_amount: rule.amount,
       paid_amount: 0,
-      due_date: toISODate(dueDate),
-      status: recalcObligation(0, rule.amount, toISODate(dueDate), 'upcoming'),
+      due_date: dueDate,
+      status: recalcObligation(0, rule.amount, dueDate, 'upcoming'),
       paid_date: null,
-      period_start: toISODate(periodStart),
-      period_end: toISODate(dueDate),
+      period_start: null,
+      period_end: null,
       notes: null,
     }
 
     generated.push(obligation)
     cursor = addMonths(cursor, monthsToAdd)
+    dueDate = computeDueDate(cursor, rule.day_of_month)
   }
 
-  let count = 0
-  for (const obligation of generated) {
-    const { data: existing } = await supabase
-      .from('obligations')
-      .select('id')
-      .eq('recurring_rule_id', rule.id)
-      .eq('due_date', obligation.due_date)
-      .maybeSingle()
+  if (generated.length === 0) return 0
 
-    if (!existing) {
-      const { error } = await supabase.from('obligations').insert(obligation)
-      if (!error) count++
-    }
-  }
+  const { error, count } = await supabase
+    .from('obligations')
+    .upsert(generated, {
+      onConflict: 'recurring_rule_id,due_date',
+      ignoreDuplicates: true,
+      count: 'exact',
+    })
+
+  if (error) throw new Error(error.message)
 
   revalidatePath('/obligations')
   revalidatePath('/dashboard')
   revalidatePath(`/properties/${rule.property_id}`)
-  return count
+  return count ?? generated.length
+}
+
+function computeDueDate(cursor: Date, dayOfMonth: number): string {
+  const year = cursor.getUTCFullYear()
+  const month = cursor.getUTCMonth()
+  const day = Math.min(dayOfMonth, daysInMonth(year, month))
+  const due = new Date(Date.UTC(year, month, day))
+  return toISODate(due)
 }
 
 function daysInMonth(year: number, month: number) {

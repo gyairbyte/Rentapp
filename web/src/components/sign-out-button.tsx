@@ -1,17 +1,19 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { signOut } from '@/lib/actions/auth'
 
 export function SignOutButton() {
   const [isPending, setIsPending] = useState(false)
+  const router = useRouter()
 
   async function handleClick() {
     setIsPending(true)
     const result = await signOut()
     setIsPending(false)
     if ('success' in result) {
-      window.location.href = '/login'
+      router.push('/login')
     }
   }
 

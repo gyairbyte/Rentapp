@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/client'
 import { obligationSchema } from '@/lib/validations/obligation'
 import { requireUser } from './helpers'
-import { formatZodErrors, recalcObligation } from '@/lib/utils'
+import { formatZodErrors, recalcObligation, calculatePaidDate } from '@/lib/utils'
 import type { Obligation, Payment } from '@/lib/types'
 
 type ActionResult =
@@ -15,7 +15,7 @@ export async function getObligations(
   options: { propertyId?: string; direction?: string; status?: string; includeResolved?: boolean } = {}
 ): Promise<Obligation[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   let query = supabase.from('obligations').select('*').eq('user_id', user.id)
 
@@ -36,7 +36,7 @@ export async function getObligations(
 
 export async function getObligation(id: string): Promise<Obligation | null> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('obligations')
     .select('*')
@@ -60,7 +60,7 @@ export async function createObligation(formData: FormData): Promise<ActionResult
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const status = recalcObligation(0, parsed.data.expected_amount, parsed.data.due_date, 'upcoming')
 
@@ -87,7 +87,7 @@ export async function updateObligation(id: string, formData: FormData): Promise<
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: existing } = await supabase
     .from('obligations')
@@ -116,7 +116,7 @@ export async function updateObligation(id: string, formData: FormData): Promise<
 
 export async function cancelObligation(id: string): Promise<ActionResult> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: existing } = await supabase
     .from('obligations')
@@ -141,7 +141,7 @@ export async function cancelObligation(id: string): Promise<ActionResult> {
 
 export async function syncObligationPayments(obligationId: string) {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: obligation, error: obError } = await supabase
     .from('obligations')
@@ -155,16 +155,17 @@ export async function syncObligationPayments(obligationId: string) {
 
   const { data: payments, error: payError } = await supabase
     .from('payments')
-    .select('amount')
+    .select('amount, payment_date')
     .eq('obligation_id', obligationId)
     .eq('user_id', user.id)
+    .order('payment_date', { ascending: true })
     .returns<Payment[]>()
 
   if (payError) throw new Error(payError.message)
 
   const paidAmount = (payments ?? []).reduce((sum, p) => sum + (p.amount ?? 0), 0)
   const status = recalcObligation(paidAmount, obligation.expected_amount, obligation.due_date, obligation.status)
-  const paidDate = status === 'paid' ? obligation.due_date : null
+  const paidDate = calculatePaidDate(payments ?? [], obligation.expected_amount)
 
   await supabase
     .from('obligations')

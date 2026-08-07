@@ -166,6 +166,10 @@ create policy "Users can delete own obligations"
   to authenticated
   using (user_id = auth.uid());
 
+-- Prevent duplicate generated obligations for the same recurring rule and due date.
+create unique index if not exists obligations_recurring_due_unique
+  on public.obligations (recurring_rule_id, due_date);
+
 -- Payments against obligations
 create table if not exists public.payments (
   id uuid primary key default gen_random_uuid(),

@@ -13,7 +13,7 @@ type ActionResult =
 
 export async function getParties(): Promise<Party[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('parties')
     .select('*')
@@ -27,7 +27,7 @@ export async function getParties(): Promise<Party[]> {
 
 export async function getParty(id: string): Promise<Party | null> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('parties')
     .select('*')
@@ -42,7 +42,7 @@ export async function getParty(id: string): Promise<Party | null> {
 
 export async function getPartiesForProperty(propertyId: string): Promise<Party[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('parties')
     .select('*')
@@ -57,7 +57,7 @@ export async function getPartiesForProperty(propertyId: string): Promise<Party[]
 
 export async function getPartyOptions(): Promise<Pick<Party, 'id' | 'name' | 'party_type'>[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('parties')
     .select('id,name,party_type')
@@ -75,7 +75,7 @@ export async function createParty(formData: FormData): Promise<ActionResult> {
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { error } = await supabase.from('parties').insert({
     ...parsed.data,
@@ -97,7 +97,7 @@ export async function updateParty(id: string, formData: FormData): Promise<Actio
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { error } = await supabase
     .from('parties')
@@ -116,7 +116,7 @@ export async function updateParty(id: string, formData: FormData): Promise<Actio
 
 export async function deleteParty(id: string): Promise<ActionResult> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: existing } = await supabase
     .from('parties')

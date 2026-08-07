@@ -7,7 +7,7 @@ import { getURL } from '@/lib/utils'
 type ActionResult = { success: true } | { error: string }
 
 export async function signIn(formData: FormData): Promise<ActionResult> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const email = formData.get('email') as string
   const password = formData.get('password') as string
 
@@ -19,7 +19,7 @@ export async function signIn(formData: FormData): Promise<ActionResult> {
 }
 
 export async function signUp(formData: FormData): Promise<ActionResult> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const email = formData.get('email') as string
   const password = formData.get('password') as string
 
@@ -35,7 +35,7 @@ export async function signUp(formData: FormData): Promise<ActionResult> {
 }
 
 export async function signOut(): Promise<ActionResult> {
-  const supabase = createClient()
+  const supabase = await createClient()
   const { error } = await supabase.auth.signOut()
   if (error) return { error: error.message }
 

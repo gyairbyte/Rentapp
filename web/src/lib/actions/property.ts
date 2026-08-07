@@ -13,7 +13,7 @@ type ActionResult =
 
 export async function getProperties(): Promise<Property[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('properties')
     .select('*')
@@ -28,7 +28,7 @@ export async function getProperties(): Promise<Property[]> {
 
 export async function getProperty(id: string): Promise<Property | null> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('properties')
     .select('*')
@@ -43,7 +43,7 @@ export async function getProperty(id: string): Promise<Property | null> {
 
 export async function getPropertyOptions(): Promise<Pick<Property, 'id' | 'nickname'>[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('properties')
     .select('id,nickname')
@@ -62,7 +62,7 @@ export async function createProperty(formData: FormData): Promise<ActionResult> 
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { error } = await supabase.from('properties').insert({
     ...parsed.data,
@@ -84,7 +84,7 @@ export async function updateProperty(id: string, formData: FormData): Promise<Ac
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { error } = await supabase
     .from('properties')
@@ -102,7 +102,7 @@ export async function updateProperty(id: string, formData: FormData): Promise<Ac
 
 export async function archiveProperty(id: string): Promise<ActionResult> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { error } = await supabase
     .from('properties')

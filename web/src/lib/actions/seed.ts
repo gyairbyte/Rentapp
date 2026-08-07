@@ -8,8 +8,12 @@ import { syncObligationPayments } from './obligations'
 import type { Property, Party, Account, RecurringRule, Obligation } from '@/lib/types'
 
 export async function seedDemoData(): Promise<{ success: boolean; message: string }> {
+  if (process.env.NODE_ENV === 'production') {
+    return { success: false, message: 'Seed data is disabled in production.' }
+  }
+
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const existing = await supabase.from('properties').select('id').eq('user_id', user.id).eq('archived', false).limit(1).single()
   if (existing.data) {

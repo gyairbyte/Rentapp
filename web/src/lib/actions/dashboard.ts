@@ -7,7 +7,7 @@ import type { Obligation, Property } from '@/lib/types'
 
 export async function getDashboardData() {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const now = new Date()
   const today = toISODate(now)

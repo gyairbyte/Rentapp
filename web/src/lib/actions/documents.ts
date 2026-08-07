@@ -14,7 +14,7 @@ type ActionResult =
 
 export async function getDocuments(): Promise<Document[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('documents')
     .select('*')
@@ -28,7 +28,7 @@ export async function getDocuments(): Promise<Document[]> {
 
 export async function getDocumentsForProperty(propertyId: string): Promise<Document[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('documents')
     .select('*')
@@ -43,7 +43,7 @@ export async function getDocumentsForProperty(propertyId: string): Promise<Docum
 
 export async function getDocument(id: string): Promise<Document | null> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('documents')
     .select('*')
@@ -63,7 +63,7 @@ export async function createDocument(formData: FormData): Promise<ActionResult &
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const file = formData.get('file') as File | null
   if (!file || file.size === 0) {
@@ -109,7 +109,7 @@ export async function createDocument(formData: FormData): Promise<ActionResult &
 
 export async function updateDocumentReviewStatus(id: string, reviewStatus: string): Promise<ActionResult> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { error } = await supabase
     .from('documents')
@@ -127,7 +127,7 @@ export async function updateDocumentReviewStatus(id: string, reviewStatus: strin
 
 export async function deleteDocument(id: string): Promise<ActionResult> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: existing } = await supabase
     .from('documents')

@@ -14,7 +14,7 @@ type ActionResult =
 
 export async function getPayments(): Promise<Payment[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('payments')
     .select('*')
@@ -28,7 +28,7 @@ export async function getPayments(): Promise<Payment[]> {
 
 export async function getPaymentsForObligation(obligationId: string): Promise<Payment[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('payments')
     .select('*')
@@ -48,7 +48,7 @@ export async function createPayment(formData: FormData): Promise<ActionResult> {
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: obligation, error: obError } = await supabase
     .from('obligations')
@@ -83,7 +83,7 @@ export async function updatePayment(id: string, formData: FormData): Promise<Act
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: existing } = await supabase
     .from('payments')
@@ -112,7 +112,7 @@ export async function updatePayment(id: string, formData: FormData): Promise<Act
 
 export async function deletePayment(id: string): Promise<ActionResult> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: existing } = await supabase
     .from('payments')

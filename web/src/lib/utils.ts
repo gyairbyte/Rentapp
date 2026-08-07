@@ -42,3 +42,18 @@ export function recalcObligation(
   if (dueDate <= toISODate(addDays(new Date(), 7))) return 'due'
   return 'upcoming'
 }
+
+export function calculatePaidDate(
+  payments: { amount: number; payment_date: string }[],
+  expectedAmount: number
+): string | null {
+  const sorted = [...payments].sort((a, b) => a.payment_date.localeCompare(b.payment_date))
+  let cumulative = 0
+  for (const payment of sorted) {
+    cumulative += payment.amount
+    if (cumulative >= expectedAmount) {
+      return payment.payment_date
+    }
+  }
+  return null
+}

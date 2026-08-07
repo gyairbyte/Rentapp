@@ -3,26 +3,23 @@ export function toISODate(date: Date): string {
 }
 
 export function addDays(date: Date, days: number): Date {
-  const next = new Date(date)
-  next.setDate(next.getDate() + days)
+  const next = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+  next.setUTCDate(next.getUTCDate() + days)
   return next
 }
 
 export function addMonths(date: Date, months: number): Date {
-  const next = new Date(date)
-  next.setMonth(next.getMonth() + months)
+  const next = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+  next.setUTCMonth(next.getUTCMonth() + months)
   return next
 }
 
 export function startOfMonth(date: Date): Date {
-  const next = new Date(date)
-  next.setDate(1)
-  return next
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1))
 }
 
 export function endOfMonth(date: Date): Date {
-  const next = new Date(date.getFullYear(), date.getMonth() + 1, 0)
-  return next
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0))
 }
 
 export function getPeriodStart(frequency: string, year: number, month: number): Date {

@@ -13,7 +13,7 @@ type ActionResult =
 
 export async function getAccounts(): Promise<Account[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('accounts')
     .select('*')
@@ -27,7 +27,7 @@ export async function getAccounts(): Promise<Account[]> {
 
 export async function getAccount(id: string): Promise<Account | null> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('accounts')
     .select('*')
@@ -42,7 +42,7 @@ export async function getAccount(id: string): Promise<Account | null> {
 
 export async function getAccountsForProperty(propertyId: string): Promise<Account[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('accounts')
     .select('*')
@@ -57,7 +57,7 @@ export async function getAccountsForProperty(propertyId: string): Promise<Accoun
 
 export async function getAccountOptions(): Promise<Pick<Account, 'id' | 'account_type' | 'account_number' | 'property_id'>[]> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
   const { data, error } = await supabase
     .from('accounts')
     .select('id,account_type,account_number,property_id')
@@ -75,7 +75,7 @@ export async function createAccount(formData: FormData): Promise<ActionResult> {
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { error } = await supabase.from('accounts').insert({
     ...parsed.data,
@@ -97,7 +97,7 @@ export async function updateAccount(id: string, formData: FormData): Promise<Act
   }
 
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { error } = await supabase
     .from('accounts')
@@ -116,7 +116,7 @@ export async function updateAccount(id: string, formData: FormData): Promise<Act
 
 export async function deleteAccount(id: string): Promise<ActionResult> {
   const user = await requireUser()
-  const supabase = createClient()
+  const supabase = await createClient()
 
   const { data: existing } = await supabase
     .from('accounts')
