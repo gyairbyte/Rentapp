@@ -2,13 +2,11 @@
 
 import { useState } from 'react'
 
-type ActionResult =
-  | { success: true }
-  | { error: string; errors?: Record<string, string[]> }
+type ActionError = { error: string; errors?: Record<string, string[]> }
 
-export function useFormAction(
-  action: (formData: FormData) => Promise<ActionResult>,
-  { onSuccess }: { onSuccess?: () => void } = {}
+export function useFormAction<T extends { success: true }>(
+  action: (formData: FormData) => Promise<T | ActionError>,
+  { onSuccess }: { onSuccess?: (result: T) => void } = {}
 ) {
   const [error, setError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({})
@@ -26,7 +24,7 @@ export function useFormAction(
       setError(result.error)
       if (result.errors) setFieldErrors(result.errors)
     } else {
-      onSuccess?.()
+      onSuccess?.(result)
     }
   }
 

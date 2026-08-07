@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { generateRecurringDueDates } from './dates'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { generateRecurringDueDates, formatDateOnly } from './dates'
 
 function rule(overrides: Partial<{ start_date: string; end_date: string | null; frequency: string; day_of_month: number }> = {}) {
   return {
@@ -82,5 +82,37 @@ describe('generateRecurringDueDates', () => {
 
     expect(dates[dates.length - 1]).toBe('2026-12-01')
     expect(dates.every((d) => d <= '2026-12-15')).toBe(true)
+  })
+})
+
+describe('formatDateOnly', () => {
+  const originalTz = process.env.TZ
+
+  beforeAll(() => {
+    process.env.TZ = 'America/New_York'
+  })
+
+  afterAll(() => {
+    process.env.TZ = originalTz
+  })
+
+  it('preserves the literal calendar date for ISO date-only strings', () => {
+    expect(formatDateOnly('2026-08-31')).toBe('8/31/2026')
+    expect(formatDateOnly('2026-10-31')).toBe('10/31/2026')
+    expect(formatDateOnly('2026-12-07')).toBe('12/7/2026')
+  })
+
+  it('returns an empty string for null or undefined values', () => {
+    expect(formatDateOnly(null)).toBe('')
+    expect(formatDateOnly(undefined)).toBe('')
+  })
+
+  it('returns the original value for non-ISO date strings', () => {
+    expect(formatDateOnly('not-a-date')).toBe('not-a-date')
+  })
+
+  it('shows the calendar-date shift that naive Date formatting would introduce in a non-UTC timezone', () => {
+    // This documents why formatDateOnly must not use new Date(date).toLocaleDateString() for date-only values.
+    expect(new Date('2026-08-31').toLocaleDateString('en-US')).toBe('8/30/2026')
   })
 })
