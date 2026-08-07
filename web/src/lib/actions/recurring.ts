@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { recurringRuleSchema } from '@/lib/validations/recurring'
 import { requireUser } from './helpers'
 import { formatZodErrors } from '@/lib/utils'
-import { toISODate, addMonths } from './dates'
+import { toISODate, generateRecurringDueDates } from './dates'
 import { recalcObligation } from '@/lib/utils'
 import type { RecurringRule, ObligationInsert } from '@/lib/types'
 
@@ -175,60 +175,27 @@ export async function generateObligationsForRule(
   const user = await requireUser()
   const supabase = await createClient()
 
-  const monthsToAdd =
-    rule.frequency === 'monthly'
-      ? 1
-      : rule.frequency === 'quarterly'
-      ? 3
-      : rule.frequency === 'semiannual'
-      ? 6
-      : 12
+  const dueDates = generateRecurringDueDates(rule, fromDate, new Date())
+  if (dueDates.length === 0) return 0
 
-  const start = new Date(`${rule.start_date}T00:00:00Z`)
-  const horizon = addMonths(new Date(), 12)
-  const end = rule.end_date ? new Date(`${rule.end_date}T00:00:00Z`) : horizon
-  const limit = end < horizon ? end : horizon
-  const limitDate = toISODate(limit)
-
-  const startDate = toISODate(start)
-  const minDate = fromDate && fromDate > startDate ? fromDate : startDate
-
-  let cursor = new Date(`${rule.start_date}T00:00:00Z`)
-  let dueDate = computeDueDate(cursor, rule.day_of_month)
-
-  // Advance cursor until the due date is on or after the rule's start date.
-  while (dueDate < startDate) {
-    cursor = addMonths(cursor, monthsToAdd)
-    dueDate = computeDueDate(cursor, rule.day_of_month)
-  }
-
-  const generated: ObligationInsert[] = []
-  while (dueDate <= limitDate && dueDate >= minDate) {
-    const obligation: ObligationInsert = {
-      user_id: user.id,
-      property_id: rule.property_id,
-      account_id: rule.account_id,
-      party_id: rule.party_id,
-      recurring_rule_id: rule.id,
-      direction: rule.direction,
-      category: rule.category,
-      description: rule.description ?? `${rule.category.replace(/_/g, ' ')} (${rule.frequency})`,
-      expected_amount: rule.amount,
-      paid_amount: 0,
-      due_date: dueDate,
-      status: recalcObligation(0, rule.amount, dueDate, 'upcoming'),
-      paid_date: null,
-      period_start: null,
-      period_end: null,
-      notes: null,
-    }
-
-    generated.push(obligation)
-    cursor = addMonths(cursor, monthsToAdd)
-    dueDate = computeDueDate(cursor, rule.day_of_month)
-  }
-
-  if (generated.length === 0) return 0
+  const generated: ObligationInsert[] = dueDates.map((dueDate) => ({
+    user_id: user.id,
+    property_id: rule.property_id,
+    account_id: rule.account_id,
+    party_id: rule.party_id,
+    recurring_rule_id: rule.id,
+    direction: rule.direction,
+    category: rule.category,
+    description: rule.description ?? `${rule.category.replace(/_/g, ' ')} (${rule.frequency})`,
+    expected_amount: rule.amount,
+    paid_amount: 0,
+    due_date: dueDate,
+    status: recalcObligation(0, rule.amount, dueDate, 'upcoming'),
+    paid_date: null,
+    period_start: null,
+    period_end: null,
+    notes: null,
+  }))
 
   const { error, count } = await supabase
     .from('obligations')
@@ -244,16 +211,4 @@ export async function generateObligationsForRule(
   revalidatePath('/dashboard')
   revalidatePath(`/properties/${rule.property_id}`)
   return count ?? generated.length
-}
-
-function computeDueDate(cursor: Date, dayOfMonth: number): string {
-  const year = cursor.getUTCFullYear()
-  const month = cursor.getUTCMonth()
-  const day = Math.min(dayOfMonth, daysInMonth(year, month))
-  const due = new Date(Date.UTC(year, month, day))
-  return toISODate(due)
-}
-
-function daysInMonth(year: number, month: number) {
-  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
 }

@@ -6,7 +6,7 @@ This repository contains the **Core MVP** built on the Ticket 001 foundation: au
 
 ## Tech stack
 
-- Next.js 16 App Router + React 18 + TypeScript
+- Next.js 16 App Router + React 19 + TypeScript
 - Tailwind CSS
 - Supabase Auth + Postgres
 - Private Supabase Storage bucket (`documents`)
