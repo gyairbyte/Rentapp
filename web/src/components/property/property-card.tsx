@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { DeletePropertyButton } from './delete-property-button'
+import { ArchivePropertyButton } from './archive-property-button'
 import type { Property } from '@/lib/types'
 
 export function PropertyCard({ property }: { property: Property }) {
@@ -19,16 +19,18 @@ export function PropertyCard({ property }: { property: Property }) {
         {property.city}, {property.state} {property.zip}
       </p>
       {property.property_type && (
-        <p className="text-sm text-foreground/70 capitalize">{property.property_type}</p>
+        <p className="text-sm text-foreground/70 capitalize">
+          {property.property_type.replace(/_/g, ' ')}
+        </p>
       )}
-      <div className="mt-2 flex gap-2">
+      <div className="mt-2 flex gap-2 items-center">
         <Link
           href={`/properties/${property.id}/edit`}
           className="text-sm underline"
         >
           Edit
         </Link>
-        <DeletePropertyButton id={property.id} />
+        <ArchivePropertyButton id={property.id} />
       </div>
     </div>
   )

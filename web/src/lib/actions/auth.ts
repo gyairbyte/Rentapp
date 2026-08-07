@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/client'
+import { getURL } from '@/lib/utils'
 
 type ActionResult = { success: true } | { error: string }
 
@@ -22,7 +23,11 @@ export async function signUp(formData: FormData): Promise<ActionResult> {
   const email = formData.get('email') as string
   const password = formData.get('password') as string
 
-  const { error } = await supabase.auth.signUp({ email, password })
+  const { error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: getURL() },
+  })
   if (error) return { error: error.message }
 
   revalidatePath('/', 'layout')

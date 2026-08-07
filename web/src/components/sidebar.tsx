@@ -6,10 +6,14 @@ import { SignOutButton } from './sign-out-button'
 
 const links = [
   { href: '/dashboard', label: 'Dashboard' },
+  { href: '/inbox', label: 'Inbox' },
   { href: '/properties', label: 'Properties' },
-  { href: '/documents', label: 'Documents' },
   { href: '/obligations', label: 'Obligations' },
-  { href: '/repairs', label: 'Repairs' },
+  { href: '/parties', label: 'Parties' },
+  { href: '/accounts', label: 'Accounts' },
+  { href: '/recurring', label: 'Recurring' },
+  { href: '/documents', label: 'Documents' },
+  { href: '/add', label: 'Add' },
 ]
 
 export function Sidebar() {

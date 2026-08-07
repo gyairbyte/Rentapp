@@ -6,24 +6,28 @@ import { REVIEW_STATUSES, PROCESSING_STATUSES } from '@/lib/constants'
 
 export const dynamic = 'force-dynamic'
 
-export default async function DocumentsPage() {
+export default async function InboxPage() {
   const [documents, properties] = await Promise.all([getDocuments(), getPropertyOptions()])
   const propertyMap = Object.fromEntries(properties.map((p) => [p.id, p.nickname]))
+
+  const inboxItems = documents.filter(
+    (d) => d.review_status === 'pending' || d.processing_status === 'pending' || d.processing_status === 'processing'
+  )
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Documents</h1>
+        <h1 className="text-2xl font-bold">Inbox</h1>
         <Link href="/documents/new" className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90">
           Upload
         </Link>
       </div>
-      {documents.length === 0 ? (
-        <p className="text-foreground/70">No documents yet.</p>
+      {inboxItems.length === 0 ? (
+        <p className="text-foreground/70">Nothing to review.</p>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {documents.map((doc) => (
-            <DocumentCard key={doc.id} document={doc} propertyMap={propertyMap} />
+          {inboxItems.map((doc) => (
+            <InboxCard key={doc.id} document={doc} propertyMap={propertyMap} />
           ))}
         </ul>
       )}
@@ -31,7 +35,7 @@ export default async function DocumentsPage() {
   )
 }
 
-async function DocumentCard({
+async function InboxCard({
   document: doc,
   propertyMap,
 }: {
@@ -51,8 +55,7 @@ async function DocumentCard({
         {doc.original_filename}
       </Link>
       <p className="text-sm text-foreground/70">
-        {doc.document_type ? doc.document_type.replace(/_/g, ' ') : 'Document'}
-        {doc.property_id ? ` · ${propertyMap[doc.property_id] ?? ''}` : ''}
+        {propertyMap[doc.property_id ?? ''] ?? 'Unknown property'}
       </p>
       <p className="text-sm text-foreground/70">
         {REVIEW_STATUSES.find((s) => s.value === doc.review_status)?.label ?? doc.review_status} ·{' '}
