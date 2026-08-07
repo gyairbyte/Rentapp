@@ -137,4 +137,90 @@ describe('parseExtraction', () => {
   it('returns null for undefined input', () => {
     expect(parseExtraction(undefined)).toBeNull()
   })
+
+  it('accepts a legacy payment option without late_payment_terms, defaulting to an empty array', () => {
+    const raw = {
+      ...emptyExtraction(),
+      proposed_actions: [
+        {
+          type: 'obligation',
+          direction: 'payable',
+          category: 'water',
+          description: null,
+          expected_amount: 100,
+          due_date: '2026-08-25',
+          action_due_date: null,
+          period_start: null,
+          period_end: null,
+          title: null,
+          payment_options: [
+            {
+              option_type: 'installment_plan',
+              amount: 100,
+              due_date: '2026-08-25',
+              description: 'Installment plan',
+              discount_amount: null,
+              penalty_amount: null,
+              penalty_date: null,
+              installments: [
+                { amount: 50, due_date: '2026-08-25', description: 'First' },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const parsed = parseExtraction(raw)
+    expect(parsed).not.toBeNull()
+    expect(parsed?.proposed_actions[0].payment_options[0].late_payment_terms).toEqual([])
+    expect(parsed?.proposed_actions[0].payment_options[0].installments[0].late_payment_terms).toEqual([])
+  })
+
+  it('parses a payment option with late_payment_terms and installment late_payment_terms', () => {
+    const raw = {
+      ...emptyExtraction(),
+      proposed_actions: [
+        {
+          type: 'obligation',
+          direction: 'payable',
+          category: 'school_tax',
+          description: null,
+          expected_amount: 1756.51,
+          due_date: '2026-10-31',
+          action_due_date: null,
+          period_start: null,
+          period_end: null,
+          title: null,
+          payment_options: [
+            {
+              option_type: 'full',
+              amount: 1756.51,
+              due_date: '2026-10-31',
+              description: 'Full base payment',
+              discount_amount: null,
+              penalty_amount: null,
+              penalty_date: null,
+              late_payment_terms: [
+                {
+                  term_type: 'penalty',
+                  amount: 1932.16,
+                  rate: 0.1,
+                  effective_date: '2026-10-31',
+                  due_date: '2026-10-31',
+                  description: 'Add 10% penalty after 10/31/2026',
+                },
+              ],
+              installments: [],
+            },
+          ],
+        },
+      ],
+    }
+    const parsed = parseExtraction(raw)
+    expect(parsed).not.toBeNull()
+    const term = parsed?.proposed_actions[0].payment_options[0].late_payment_terms[0]
+    expect(term?.term_type).toBe('penalty')
+    expect(term?.rate).toBe(0.1)
+    expect(term?.amount).toBe(1932.16)
+  })
 })

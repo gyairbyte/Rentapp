@@ -24,21 +24,32 @@ const extractedDirectionSchema = z.object({
   evidence: z.string().nullable(),
 })
 
-const paymentInstallmentSchema = z.object({
+const paymentTermSchema = z.object({
+  term_type: z.enum(['penalty', 'late_fee', 'discount', 'other']),
   amount: z.number().nullable(),
+  rate: z.number().nullable(),
+  effective_date: z.string().nullable(),
   due_date: z.string().nullable(),
   description: z.string().nullable(),
 })
 
+const paymentInstallmentSchema = z.object({
+  amount: z.number().nullable(),
+  due_date: z.string().nullable(),
+  description: z.string().nullable(),
+  late_payment_terms: z.array(paymentTermSchema).default([]),
+})
+
 const paymentOptionSchema = z.object({
-  option_type: z.enum(['full', 'discounted', 'installment_plan', 'other']),
+  option_type: z.enum(['full', 'discounted', 'installment_plan', 'other', 'penalty', 'late_fee']),
   amount: z.number().nullable(),
   due_date: z.string().nullable(),
   description: z.string().nullable(),
   discount_amount: z.number().nullable(),
   penalty_amount: z.number().nullable(),
   penalty_date: z.string().nullable(),
-  installments: z.array(paymentInstallmentSchema),
+  late_payment_terms: z.array(paymentTermSchema).default([]),
+  installments: z.array(paymentInstallmentSchema).default([]),
 })
 
 const proposedActionSchema = z.object({
@@ -157,33 +168,55 @@ const directionJsonSchema = {
   additionalProperties: false,
 }
 
+const paymentTermJsonSchema = {
+  type: 'object',
+  properties: {
+    term_type: { type: 'string', enum: ['penalty', 'late_fee', 'discount', 'other'] },
+    amount: { type: ['number', 'null'] },
+    rate: { type: ['number', 'null'] },
+    effective_date: { type: ['string', 'null'] },
+    due_date: { type: ['string', 'null'] },
+    description: { type: ['string', 'null'] },
+  },
+  required: ['term_type', 'amount', 'rate', 'effective_date', 'due_date', 'description'],
+  additionalProperties: false,
+}
+
 const paymentInstallmentJsonSchema = {
   type: 'object',
   properties: {
     amount: { type: ['number', 'null'] },
     due_date: { type: ['string', 'null'] },
     description: { type: ['string', 'null'] },
+    late_payment_terms: {
+      type: 'array',
+      items: paymentTermJsonSchema,
+    },
   },
-  required: ['amount', 'due_date', 'description'],
+  required: ['amount', 'due_date', 'description', 'late_payment_terms'],
   additionalProperties: false,
 }
 
 const paymentOptionJsonSchema = {
   type: 'object',
   properties: {
-    option_type: { type: 'string', enum: ['full', 'discounted', 'installment_plan', 'other'] },
+    option_type: { type: 'string', enum: ['full', 'discounted', 'installment_plan', 'other', 'penalty', 'late_fee'] },
     amount: { type: ['number', 'null'] },
     due_date: { type: ['string', 'null'] },
     description: { type: ['string', 'null'] },
     discount_amount: { type: ['number', 'null'] },
     penalty_amount: { type: ['number', 'null'] },
     penalty_date: { type: ['string', 'null'] },
+    late_payment_terms: {
+      type: 'array',
+      items: paymentTermJsonSchema,
+    },
     installments: {
       type: 'array',
       items: paymentInstallmentJsonSchema,
     },
   },
-  required: ['option_type', 'amount', 'due_date', 'description', 'discount_amount', 'penalty_amount', 'penalty_date', 'installments'],
+  required: ['option_type', 'amount', 'due_date', 'description', 'discount_amount', 'penalty_amount', 'penalty_date', 'late_payment_terms', 'installments'],
   additionalProperties: false,
 }
 

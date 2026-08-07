@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { confirmDocument, retryProcessDocument, archiveDocument } from '@/lib/actions/documents'
 import { Field, SelectField } from '@/components/ui/form'
 import { DOCUMENT_TYPES, DIRECTIONS, OBLIGATION_CATEGORIES } from '@/lib/constants'
-import type { Document, DocumentExtraction, DocumentMatch, PaymentOption } from '@/lib/types'
+import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
 
 function formatCurrency(amount: number | null) {
@@ -13,14 +13,55 @@ function formatCurrency(amount: number | null) {
   return `$${Number(amount).toFixed(2)}`
 }
 
+function formatDate(date: string | null) {
+  if (!date) return ''
+  try {
+    return new Date(date).toLocaleDateString()
+  } catch {
+    return date
+  }
+}
+
+const SELECTABLE_OPTION_TYPES = ['full', 'discounted', 'installment_plan']
+
+function isSelectable(option: PaymentOption | null | undefined) {
+  return !!option && SELECTABLE_OPTION_TYPES.includes(option.option_type)
+}
+
 function formatOptionSummary(option: PaymentOption) {
   const parts: string[] = []
   if (option.amount !== null) parts.push(formatCurrency(option.amount))
-  if (option.due_date) parts.push(`due ${option.due_date}`)
-  if (option.discount_amount !== null) parts.push(`discount ${formatCurrency(option.discount_amount)}`)
-  if (option.penalty_amount !== null) parts.push(`penalty ${formatCurrency(option.penalty_amount)}`)
+  if (option.due_date) parts.push(`due ${formatDate(option.due_date)}`)
+  if (option.discount_amount !== null && option.discount_amount > 0) parts.push(`discount ${formatCurrency(option.discount_amount)}`)
   if (parts.length > 0) return parts.join(' · ')
   return option.description ?? option.option_type.replace(/_/g, ' ')
+}
+
+function formatTerm(term: PaymentTerm) {
+  const parts: string[] = []
+  if (term.term_type) parts.push(term.term_type.replace(/_/g, ' '))
+  if (term.rate !== null && term.rate > 0) parts.push(`${(term.rate * 100).toFixed(0)}%`)
+  if (term.amount !== null) parts.push(formatCurrency(term.amount))
+  if (term.effective_date) parts.push(`effective ${formatDate(term.effective_date)}`)
+  if (term.due_date) parts.push(`due ${formatDate(term.due_date)}`)
+  if (term.description) parts.push(term.description)
+  return parts.filter(Boolean).join(' · ')
+}
+
+function allLatePaymentTerms(option: PaymentOption | undefined): PaymentTerm[] {
+  if (!option) return []
+  const terms: PaymentTerm[] = [...(option.late_payment_terms ?? [])]
+  if (option.penalty_amount !== null && option.penalty_date) {
+    terms.push({
+      term_type: 'penalty',
+      amount: option.penalty_amount,
+      rate: null,
+      effective_date: option.penalty_date,
+      due_date: option.penalty_date,
+      description: `Penalty if not paid by ${formatDate(option.penalty_date)}`,
+    })
+  }
+  return terms
 }
 
 export function DocumentReviewForm({
@@ -47,9 +88,17 @@ export function DocumentReviewForm({
   const proposedObligation = extraction.proposed_actions.find((a) => a.type === 'obligation')
   const proposedTask = extraction.proposed_actions.find((a) => a.type === 'task')
   const paymentOptions = proposedObligation?.payment_options ?? []
-  const hasPaymentOptions = paymentOptions.length > 0
-  const [selectedOptionIndex, setSelectedOptionIndex] = useState(0)
-  const selectedOption = hasPaymentOptions ? paymentOptions[selectedOptionIndex] : null
+  const selectableOptions = paymentOptions.map((option, idx) => ({ option, idx })).filter(({ option }) => isSelectable(option))
+  const hasPaymentOptions = selectableOptions.length > 0
+  const nonSelectableOptions = paymentOptions.filter((option) => !isSelectable(option))
+  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState(selectableOptions[0]?.idx ?? 0)
+  const selectedOption = paymentOptions[selectedOriginalIndex] ?? null
+
+  // If the set of selectable options changes (e.g. extraction reloaded), reset to the first selectable option.
+  const firstSelectableIndex = selectableOptions[0]?.idx
+  if (firstSelectableIndex !== undefined && !isSelectable(selectedOption)) {
+    setSelectedOriginalIndex(firstSelectableIndex)
+  }
 
   // High-confidence deterministic matches may be prefilled, but remain visibly reviewable.
   const suggestedPropertyId = document.property_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.property_id : null)
@@ -174,19 +223,63 @@ export function DocumentReviewForm({
         />
       </section>
 
+      {proposedObligation && (
+        <section className="rounded-lg border p-4 space-y-3">
+          <h2 className="text-lg font-semibold">Bill summary</h2>
+          <dl className="grid grid-cols-2 gap-2 text-sm">
+            {extraction.document_type && (
+              <>
+                <dt className="text-foreground/60">Document type</dt>
+                <dd className="font-medium">{extraction.document_type}</dd>
+              </>
+            )}
+            {extraction.issuer.value && (
+              <>
+                <dt className="text-foreground/60">Issuer / provider</dt>
+                <dd className="font-medium">{extraction.issuer.value}</dd>
+              </>
+            )}
+            {extraction.parcel_number.value && (
+              <>
+                <dt className="text-foreground/60">Parcel / account</dt>
+                <dd className="font-medium">{extraction.parcel_number.value}</dd>
+              </>
+            )}
+            {extraction.account_number.value && (
+              <>
+                <dt className="text-foreground/60">Account number</dt>
+                <dd className="font-medium">{extraction.account_number.value}</dd>
+              </>
+            )}
+            {extraction.amount_due.value !== null && extraction.amount_due.value !== undefined && (
+              <>
+                <dt className="text-foreground/60">Amount due</dt>
+                <dd className="font-medium">{formatCurrency(extraction.amount_due.value)}</dd>
+              </>
+            )}
+            {extraction.service_address.value && (
+              <>
+                <dt className="text-foreground/60">Service / property address</dt>
+                <dd className="font-medium">{extraction.service_address.value}</dd>
+              </>
+            )}
+          </dl>
+        </section>
+      )}
+
       {hasPaymentOptions && (
         <section className="space-y-4 rounded-lg border p-4">
           <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
             This document contains multiple payment options and deadlines. Select the plan you intend to follow.
           </div>
-          <input type="hidden" name="selected_payment_option_index" value={selectedOptionIndex} />
+          <input type="hidden" name="selected_payment_option_index" value={selectedOriginalIndex} />
           <fieldset className="space-y-3">
             <legend className="font-semibold">Payment options</legend>
-            {paymentOptions.map((option, idx) => (
+            {selectableOptions.map(({ option, idx }) => (
               <label
                 key={idx}
                 className={`block rounded-lg border p-3 cursor-pointer transition-colors ${
-                  selectedOptionIndex === idx ? 'border-foreground bg-foreground/5' : 'hover:bg-foreground/5'
+                  selectedOriginalIndex === idx ? 'border-foreground bg-foreground/5' : 'hover:bg-foreground/5'
                 }`}
               >
                 <div className="flex items-start gap-3">
@@ -194,27 +287,84 @@ export function DocumentReviewForm({
                     type="radio"
                     name="payment_option"
                     value={idx}
-                    checked={selectedOptionIndex === idx}
-                    onChange={() => setSelectedOptionIndex(idx)}
+                    checked={selectedOriginalIndex === idx}
+                    onChange={() => setSelectedOriginalIndex(idx)}
                     className="mt-1"
                   />
                   <div className="flex-1">
                     <p className="font-medium">{option.description ?? option.option_type.replace(/_/g, ' ')}</p>
                     <p className="text-sm text-foreground/70">{formatOptionSummary(option)}</p>
-                    {option.option_type === 'installment_plan' && option.installments.length > 0 && (
-                      <ul className="text-sm text-foreground/70 mt-2 space-y-1 pl-4 list-disc">
-                        {option.installments.map((inst, i) => (
-                          <li key={i}>
-                            {inst.description ?? `Payment ${i + 1}`}: {formatCurrency(inst.amount)} due {inst.due_date}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
                   </div>
                 </div>
               </label>
             ))}
           </fieldset>
+
+          {selectedOption && (
+            <div className="rounded-md border p-3 space-y-3">
+              <h3 className="font-medium">Selected schedule</h3>
+              {selectedOption.option_type === 'installment_plan' && selectedOption.installments.length > 0 ? (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-foreground/60 border-b">
+                      <th className="pb-2 font-medium">#</th>
+                      <th className="pb-2 font-medium">Amount</th>
+                      <th className="pb-2 font-medium">Due date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedOption.installments.map((inst, i) => (
+                      <tr key={i} className="border-b last:border-0">
+                        <td className="py-2">{i + 1}</td>
+                        <td className="py-2">{formatCurrency(inst.amount)}</td>
+                        <td className="py-2">{formatDate(inst.due_date)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="text-sm">
+                  <p className="font-medium">{formatCurrency(selectedOption.amount)} due {formatDate(selectedOption.due_date)}</p>
+                </div>
+              )}
+
+              {(allLatePaymentTerms(selectedOption).length > 0 ||
+                selectedOption.installments.some((inst) => (inst.late_payment_terms ?? []).length > 0)) && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm">
+                  <h4 className="font-medium text-amber-900 mb-1">Late-payment terms</h4>
+                  {allLatePaymentTerms(selectedOption).length > 0 && (
+                    <ul className="space-y-1 list-disc pl-4 text-amber-900/80">
+                      {allLatePaymentTerms(selectedOption).map((term, i) => (
+                        <li key={i}>{formatTerm(term)}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {selectedOption.installments.some((inst) => (inst.late_payment_terms ?? []).length > 0) && (
+                    <ul className="mt-2 space-y-1 pl-4 text-amber-900/80">
+                      {selectedOption.installments.map((inst, i) =>
+                        (inst.late_payment_terms ?? []).map((term, j) => (
+                          <li key={`${i}-${j}`} className="list-disc">
+                            Installment {i + 1}: {formatTerm(term)}
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {nonSelectableOptions.length > 0 && (
+            <div className="rounded-md border p-3 text-sm text-foreground/70">
+              <h4 className="font-medium mb-1">Other terms</h4>
+              <ul className="space-y-1 list-disc pl-4">
+                {nonSelectableOptions.map((option, i) => (
+                  <li key={i}>{option.description ?? option.option_type.replace(/_/g, ' ')} — {formatOptionSummary(option)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
       )}
 

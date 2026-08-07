@@ -463,6 +463,8 @@ export async function confirmDocument(documentId: string, formData: FormData): P
   let selectedDueDate: string | null = null
   let selectedPaymentOptionIndex: number | null = null
 
+  const SELECTABLE_OPTION_TYPES = ['full', 'discounted', 'installment_plan']
+
   if (paymentOptions.length > 0) {
     if (!selectedPaymentOptionIndexRaw) {
       return { error: 'A payment option must be selected' }
@@ -471,8 +473,11 @@ export async function confirmDocument(documentId: string, formData: FormData): P
     if (Number.isNaN(index) || index < 0 || index >= paymentOptions.length) {
       return { error: 'Invalid payment option selection' }
     }
-    selectedPaymentOptionIndex = index
     const selected = paymentOptions[index]
+    if (!selected || !SELECTABLE_OPTION_TYPES.includes(selected.option_type)) {
+      return { error: 'Selected payment option is not a valid selectable plan' }
+    }
+    selectedPaymentOptionIndex = index
     selectedAmount = selected.amount ?? null
     selectedDueDate = selected.due_date ?? null
   } else {

@@ -205,20 +205,31 @@ export type DocumentUpdate = Partial<Omit<Document, 'id' | 'user_id' | 'created_
 
 export type Confidence = 'high' | 'medium' | 'low'
 
-export type PaymentInstallment = {
+export type PaymentTerm = {
+  term_type: 'penalty' | 'late_fee' | 'discount' | 'other'
   amount: number | null
+  rate: number | null
+  effective_date: string | null
   due_date: string | null
   description: string | null
 }
 
+export type PaymentInstallment = {
+  amount: number | null
+  due_date: string | null
+  description: string | null
+  late_payment_terms: PaymentTerm[]
+}
+
 export type PaymentOption = {
-  option_type: 'full' | 'discounted' | 'installment_plan' | 'other'
+  option_type: 'full' | 'discounted' | 'installment_plan' | 'other' | 'penalty' | 'late_fee'
   amount: number | null
   due_date: string | null
   description: string | null
   discount_amount: number | null
   penalty_amount: number | null
   penalty_date: string | null
+  late_payment_terms: PaymentTerm[]
   installments: PaymentInstallment[]
 }
 

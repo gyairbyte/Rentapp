@@ -26,6 +26,7 @@ const taxPaymentOptions: PaymentOption[] = [
     discount_amount: 52.7,
     penalty_amount: null,
     penalty_date: null,
+    late_payment_terms: [],
     installments: [],
   },
   {
@@ -34,8 +35,9 @@ const taxPaymentOptions: PaymentOption[] = [
     due_date: '2026-10-31',
     description: 'Full base payment by 10/31/2026',
     discount_amount: null,
-    penalty_amount: 175.65,
-    penalty_date: '2026-11-01',
+    penalty_amount: null,
+    penalty_date: null,
+    late_payment_terms: [],
     installments: [],
   },
   {
@@ -46,11 +48,12 @@ const taxPaymentOptions: PaymentOption[] = [
     discount_amount: null,
     penalty_amount: null,
     penalty_date: null,
+    late_payment_terms: [],
     installments: [
-      { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4' },
-      { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4' },
-      { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4' },
-      { amount: 439.12, due_date: '2026-12-07', description: 'Installment 4 of 4' },
+      { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4', late_payment_terms: [] },
+      { amount: 439.12, due_date: '2026-12-07', description: 'Installment 4 of 4', late_payment_terms: [] },
     ],
   },
 ]

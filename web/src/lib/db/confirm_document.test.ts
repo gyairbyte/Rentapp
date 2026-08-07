@@ -19,6 +19,7 @@ const taxPaymentOptions = [
     discount_amount: 52.7,
     penalty_amount: null,
     penalty_date: null,
+    late_payment_terms: [],
     installments: [],
   },
   {
@@ -27,8 +28,11 @@ const taxPaymentOptions = [
     due_date: '2026-10-31',
     description: 'Full base payment by 10/31/2026',
     discount_amount: null,
-    penalty_amount: 175.65,
-    penalty_date: '2026-11-01',
+    penalty_amount: null,
+    penalty_date: null,
+    late_payment_terms: [
+      { term_type: 'penalty', amount: 1932.16, rate: 0.1, effective_date: '2026-10-31', due_date: '2026-10-31', description: 'Add 10% penalty after 10/31/2026' },
+    ],
     installments: [],
   },
   {
@@ -39,11 +43,12 @@ const taxPaymentOptions = [
     discount_amount: null,
     penalty_amount: null,
     penalty_date: null,
+    late_payment_terms: [],
     installments: [
-      { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4' },
-      { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4' },
-      { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4' },
-      { amount: 439.12, due_date: '2026-12-07', description: 'Installment 4 of 4' },
+      { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4', late_payment_terms: [] },
+      { amount: 439.12, due_date: '2026-12-07', description: 'Installment 4 of 4', late_payment_terms: [] },
     ],
   },
 ]
@@ -182,8 +187,8 @@ describeDb('confirm_document multi-payment behavior', () => {
 
   it('two source items with the same due date remain distinct', async () => {
     const installments = [
-      { amount: 100, due_date: '2026-10-31', description: 'First' },
-      { amount: 200, due_date: '2026-10-31', description: 'Second same day' },
+      { amount: 100, due_date: '2026-10-31', description: 'First', late_payment_terms: [] },
+      { amount: 200, due_date: '2026-10-31', description: 'Second same day', late_payment_terms: [] },
     ]
     const documentId = await createTestDocument(client, ctx.userId, {})
     await callConfirm(client, ctx.userId, documentId, ctx.propertyId, {
@@ -196,6 +201,7 @@ describeDb('confirm_document multi-payment behavior', () => {
           discount_amount: null,
           penalty_amount: null,
           penalty_date: null,
+          late_payment_terms: [],
           installments,
         },
       ],
@@ -239,7 +245,7 @@ describeDb('confirm_document multi-payment behavior', () => {
         discount_amount: null,
         penalty_amount: null,
         penalty_date: null,
-        installments: [{ amount: 'not-a-number', due_date: '2026-10-31', description: 'Bad installment' }],
+        installments: [{ amount: 'not-a-number', due_date: '2026-10-31', description: 'Bad installment', late_payment_terms: [] }],
       },
     ]
 
@@ -268,6 +274,7 @@ describeDb('confirm_document multi-payment behavior', () => {
         discount_amount: null,
         penalty_amount: null,
         penalty_date: null,
+        late_payment_terms: [],
         installments: [],
       },
     ]
@@ -288,8 +295,8 @@ describeDb('confirm_document multi-payment behavior', () => {
 
   it('partial failure rolls back all obligations and leaves the document unconfirmed', async () => {
     const installments = [
-      { amount: 100, due_date: '2026-08-03', description: 'Good' },
-      { amount: 0, due_date: '2026-09-14', description: 'Bad' },
+      { amount: 100, due_date: '2026-08-03', description: 'Good', late_payment_terms: [] },
+      { amount: 0, due_date: '2026-09-14', description: 'Bad', late_payment_terms: [] },
     ]
     const documentId = await createTestDocument(client, ctx.userId, {})
 
@@ -304,6 +311,7 @@ describeDb('confirm_document multi-payment behavior', () => {
             discount_amount: null,
             penalty_amount: null,
             penalty_date: null,
+            late_payment_terms: [],
             installments,
           },
         ],
@@ -372,6 +380,7 @@ describeDb('confirm_document multi-payment behavior', () => {
         discount_amount: null,
         penalty_amount: null,
         penalty_date: null,
+        late_payment_terms: [],
         installments: [],
       },
     ]
@@ -381,7 +390,7 @@ describeDb('confirm_document multi-payment behavior', () => {
         payment_options: badOptions,
         selected_payment_option_index: 0,
       }),
-    ).rejects.toThrow('Unrecognized payment option type')
+    ).rejects.toThrow('Unrecognized or non-selectable payment option type')
   })
 
   it('empty installment plan rejects and creates nothing', async () => {
@@ -395,6 +404,7 @@ describeDb('confirm_document multi-payment behavior', () => {
         discount_amount: null,
         penalty_amount: null,
         penalty_date: null,
+        late_payment_terms: [],
         installments: [],
       },
     ]
@@ -405,6 +415,53 @@ describeDb('confirm_document multi-payment behavior', () => {
         selected_payment_option_index: 0,
       }),
     ).rejects.toThrow('at least one installment')
+
+    const { rows } = await client.query<{ count: number }>(
+      'select count(*)::int as count from public.obligations where source_document_id = $1',
+      [documentId],
+    )
+    expect(rows[0].count).toBe(0)
+  })
+
+  it('selecting full payment with a late-payment penalty term creates only one obligation, not the penalty', async () => {
+    const documentId = await createTestDocument(client, ctx.userId, {})
+    await callConfirm(client, ctx.userId, documentId, ctx.propertyId, {
+      payment_options: taxPaymentOptions,
+      selected_payment_option_index: 1,
+    })
+
+    const { rows: obligations } = await client.query(
+      'select expected_amount, source_item_key from public.obligations where source_document_id = $1 order by source_item_key',
+      [documentId],
+    )
+    expect(obligations).toHaveLength(1)
+    expect(Number(obligations[0].expected_amount)).toBe(taxPaymentOptions[1].amount)
+    expect(obligations[0].source_item_key).toBe('option_1:full')
+  })
+
+  it('selecting a penalty option type rejects and creates nothing', async () => {
+    const documentId = await createTestDocument(client, ctx.userId, {})
+    const penaltyOptions = [
+      ...taxPaymentOptions,
+      {
+        option_type: 'penalty',
+        amount: 1932.16,
+        due_date: '2026-10-31',
+        description: 'Add 10% penalty after 10/31/2026',
+        discount_amount: null,
+        penalty_amount: null,
+        penalty_date: null,
+        late_payment_terms: [],
+        installments: [],
+      },
+    ]
+
+    await expect(
+      callConfirm(client, ctx.userId, documentId, ctx.propertyId, {
+        payment_options: penaltyOptions,
+        selected_payment_option_index: 3,
+      }),
+    ).rejects.toThrow('non-selectable payment option type')
 
     const { rows } = await client.query<{ count: number }>(
       'select count(*)::int as count from public.obligations where source_document_id = $1',

@@ -8,25 +8,28 @@ function normalize(text: string | null | undefined): string {
     .replace(/\./g, '')
     .replace(/,/g, '')
     .replace(/#/g, '')
+    .replace(/-/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
 
 function normalizeAddress(text: string | null | undefined): string {
   return normalize(text)
-    .replace(/street/g, 'st')
-    .replace(/avenue/g, 'ave')
-    .replace(/road/g, 'rd')
-    .replace(/boulevard/g, 'blvd')
-    .replace(/drive/g, 'dr')
-    .replace(/lane/g, 'ln')
-    .replace(/court/g, 'ct')
-    .replace(/apartment/g, 'apt')
-    .replace(/unit/g, 'unit')
-    .replace(/north/g, 'n')
-    .replace(/south/g, 's')
-    .replace(/east/g, 'e')
-    .replace(/west/g, 'w')
+    .replace(/\bstreet\b/g, 'st')
+    .replace(/\bavenue\b/g, 'ave')
+    .replace(/\bavenues\b/g, 'ave')
+    .replace(/\broad\b/g, 'rd')
+    .replace(/\bboulevard\b/g, 'blvd')
+    .replace(/\bdrive\b/g, 'dr')
+    .replace(/\blane\b/g, 'ln')
+    .replace(/\bcourt\b/g, 'ct')
+    .replace(/\bapartment\b/g, 'apt')
+    .replace(/\bunit\b/g, 'unit')
+    .replace(/\bnorth\b/g, 'n')
+    .replace(/\bsouth\b/g, 's')
+    .replace(/\beast\b/g, 'e')
+    .replace(/\bwest\b/g, 'w')
+    .replace(/(\d{5})-\d{4}/g, '$1')
     .trim()
 }
 
@@ -35,11 +38,25 @@ function addressMatchScore(addr1: string, addr2: string): number {
   const b = normalizeAddress(addr2)
   if (!a || !b) return 0
   if (a === b) return 1
-  // Both contain same significant tokens in any order
-  const tokensA = new Set(a.split(' ').filter(Boolean))
+
+  const tokensA = a.split(' ').filter(Boolean)
   const tokensB = b.split(' ').filter(Boolean)
-  const intersection = tokensB.filter((t) => tokensA.has(t))
-  if (intersection.length >= 3 && intersection.length / Math.max(tokensA.size, tokensB.length) >= 0.6) return 0.8
+  const setA = new Set(tokensA)
+  const setB = new Set(tokensB)
+
+  // If one address is a subset of the other (e.g., short document address vs full property address),
+  // treat it as a strong match as long as at least 3 significant tokens align.
+  const intersectionA = tokensA.filter((t) => setB.has(t))
+  const intersectionB = tokensB.filter((t) => setA.has(t))
+  const minTokens = Math.min(tokensA.length, tokensB.length)
+  if (minTokens >= 3 && intersectionA.length === minTokens) return 1
+  if (minTokens >= 3 && intersectionB.length === minTokens) return 1
+
+  // Partial match: enough shared significant tokens relative to the larger address.
+  const intersection = [...setA].filter((t) => setB.has(t))
+  const unionSize = new Set([...tokensA, ...tokensB]).size
+  if (intersection.length >= 3 && intersection.length / unionSize >= 0.5) return 0.8
+  if (intersection.length >= 2 && intersection.length / unionSize >= 0.7) return 0.8
   return 0
 }
 

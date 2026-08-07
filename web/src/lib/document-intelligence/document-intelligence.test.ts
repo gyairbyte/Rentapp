@@ -9,6 +9,7 @@ import type { DocumentExtraction } from '@/lib/types'
 const properties = [
   { id: 'p-1', nickname: '123 Main', street_address: '123 Main Street', city: 'Springfield', state: 'IL', zip: '62704' },
   { id: 'p-2', nickname: 'Walton', street_address: '78 Walton Avenue', city: 'Springfield', state: 'IL', zip: '62704' },
+  { id: 'p-bergen', nickname: 'Fountain Hill', street_address: '610 S Bergen Street', city: 'Fountain Hill', state: 'PA', zip: '18015' },
 ]
 
 const accounts = [
@@ -126,6 +127,20 @@ describe('Document matching', () => {
     const accountsWithoutParties = accounts.map((a) => ({ ...a, party_id: null as string | null }))
     const match = findDocumentMatch(extraction, makeInput({ userAccounts: accountsWithoutParties }))
     expect(match.account_id).toBeNull()
+  })
+
+  it.each([
+    ['610 S Bergen, Fountain Hill, PA 18015', 'p-bergen'],
+    ['610 South Bergen Street, Fountain Hill, PA 18015', 'p-bergen'],
+    ['610 S. Bergen St., Fountain Hill, Pennsylvania 18015', 'p-bergen'],
+    ['610 S BERGEN ST, FOUNTAIN HILL, PA 18015-1234', 'p-bergen'],
+  ])('matches an exact normalized address with high confidence: %s', (address, expectedPropertyId) => {
+    const extraction = makeExtraction({
+      service_address: field(address, 'high'),
+    })
+    const match = findDocumentMatch(extraction, makeInput({ userProperties: properties }))
+    expect(match.property_id).toBe(expectedPropertyId)
+    expect(match.confidence).toBe('high')
   })
 })
 
@@ -252,20 +267,32 @@ describe('Provider failure handling', () => {
 })
 
 describe('Payment options extraction', () => {
-  it('extracts discount, base, and installment options for a school tax notice', async () => {
+  it('extracts a school tax notice with document, issuer, parcel, property match, and genuine payment choices', async () => {
     const provider = mockDocumentIntelligenceProvider
+    const bergenProperties = properties.filter((p) => p.id === 'p-bergen')
     const input = {
       fileBuffer: Buffer.from('tax notice'),
       mimeType: 'application/pdf',
       filename: 'Bethlehem_Area_School_District_2026_2027_tax_notice.pdf',
-      userProperties: properties,
+      userProperties: bergenProperties,
       userAccounts: accounts,
       userParties: parties,
     }
     const result = await provider.analyzeDocument(input)
+    expect(result.extraction.document_type).toBe('school_tax')
+    expect(result.extraction.issuer.value).toBe('Bethlehem Area School District')
+    expect(result.extraction.parcel_number.value).toBe('642702833391')
+    expect(result.match.property_id).toBe('p-bergen')
+    expect(result.match.confidence).toBe('high')
+
     const proposedObligation = result.extraction.proposed_actions.find((a) => a.type === 'obligation')
     expect(proposedObligation).toBeDefined()
     expect(proposedObligation!.payment_options).toHaveLength(3)
+
+    const selectable = proposedObligation!.payment_options.filter(
+      (o) => ['full', 'discounted', 'installment_plan'].includes(o.option_type)
+    )
+    expect(selectable).toHaveLength(3)
 
     const discount = proposedObligation!.payment_options.find((o) => o.option_type === 'discounted')
     expect(discount).toBeDefined()
@@ -276,11 +303,17 @@ describe('Payment options extraction', () => {
     expect(full).toBeDefined()
     expect(full!.due_date).toBe('2026-10-31')
     expect(full!.amount).toBe(1756.51)
+    expect(full!.late_payment_terms.length).toBeGreaterThan(0)
+    const penalty = full!.late_payment_terms.find((t) => t.term_type === 'penalty')
+    expect(penalty).toBeDefined()
+    expect(penalty!.rate).toBe(0.1)
+    expect(penalty!.amount).toBe(1932.16)
 
     const installment = proposedObligation!.payment_options.find((o) => o.option_type === 'installment_plan')
     expect(installment).toBeDefined()
     expect(installment!.installments).toHaveLength(4)
     expect(installment!.installments[0].due_date).toBe('2026-08-03')
     expect(installment!.installments[3].due_date).toBe('2026-12-07')
+    expect(installment!.installments.every((inst) => Array.isArray(inst.late_payment_terms))).toBe(true)
   })
 })

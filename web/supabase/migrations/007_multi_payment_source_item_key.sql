@@ -127,8 +127,8 @@ begin
     v_option := p_payment_options->p_selected_payment_option_index;
     v_option_type := v_option->>'option_type';
 
-    if v_option_type not in ('full', 'discounted', 'installment_plan', 'other') then
-      raise exception 'Unrecognized payment option type' using errcode = 'P0001';
+    if v_option_type not in ('full', 'discounted', 'installment_plan') then
+      raise exception 'Unrecognized or non-selectable payment option type' using errcode = 'P0001';
     end if;
 
     if v_option_type = 'installment_plan' then
