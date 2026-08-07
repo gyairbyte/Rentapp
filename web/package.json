@@ -18,6 +18,9 @@
     "react-dom": "^19.2.0",
     "zod": "^4.4.3"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "devDependencies": {
     "@eslint/eslintrc": "^3.0.0",
     "@types/node": "^20",
