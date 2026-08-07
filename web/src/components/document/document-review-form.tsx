@@ -308,7 +308,7 @@ export function DocumentReviewForm({
           {selectedOption && (
             <div className="rounded-md border p-3 space-y-3">
               <h3 className="font-medium">Selected schedule</h3>
-              {selectedOption.option_type === 'installment_plan' && selectedOption.installments.length > 0 ? (
+              {selectedOption.option_type === 'installment_plan' && (selectedOption.installments ?? []).length > 0 ? (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-foreground/60 border-b">
@@ -318,7 +318,7 @@ export function DocumentReviewForm({
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedOption.installments.map((inst, i) => (
+                    {(selectedOption.installments ?? []).map((inst, i) => (
                       <tr key={i} className="border-b last:border-0">
                         <td className="py-2">{i + 1}</td>
                         <td className="py-2">{formatCurrency(inst.amount)}</td>
@@ -334,7 +334,7 @@ export function DocumentReviewForm({
               )}
 
               {(allLatePaymentTerms(selectedOption).length > 0 ||
-                selectedOption.installments.some((inst) => (inst.late_payment_terms ?? []).length > 0)) && (
+                (selectedOption.installments ?? []).some((inst) => (inst.late_payment_terms ?? []).length > 0)) && (
                 <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm">
                   <h4 className="font-medium text-amber-900 mb-1">Late-payment terms</h4>
                   {allLatePaymentTerms(selectedOption).length > 0 && (
@@ -344,9 +344,9 @@ export function DocumentReviewForm({
                       ))}
                     </ul>
                   )}
-                  {selectedOption.installments.some((inst) => (inst.late_payment_terms ?? []).length > 0) && (
+                  {(selectedOption.installments ?? []).some((inst) => (inst.late_payment_terms ?? []).length > 0) && (
                     <ul className="mt-2 space-y-1 pl-4 text-amber-900/80">
-                      {selectedOption.installments.map((inst, i) =>
+                      {(selectedOption.installments ?? []).map((inst, i) =>
                         (inst.late_payment_terms ?? []).map((term, j) => (
                           <li key={`${i}-${j}`} className="list-disc">
                             Installment {i + 1}: {formatTerm(term)}

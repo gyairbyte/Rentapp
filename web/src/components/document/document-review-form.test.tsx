@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { DocumentReviewForm } from './document-review-form'
-import { emptyExtraction } from '@/lib/document-intelligence/extraction-schema'
+import { emptyExtraction, parseExtractionOrEmpty } from '@/lib/document-intelligence/extraction-schema'
 import type { Document, DocumentExtraction, DocumentMatch, PaymentOption } from '@/lib/types'
 
 const mockPush = vi.fn()
@@ -90,6 +90,57 @@ function makeExtraction(paymentOptions: PaymentOption[] = []): DocumentExtractio
       },
     ],
   }
+}
+
+function makeLegacyExtractionRaw(): unknown {
+  const extraction: Record<string, unknown> = { ...emptyExtraction() }
+  extraction.document_type = 'school_tax'
+  extraction.document_class = 'financial'
+  extraction.requires = 'money'
+  extraction.issuer = { value: 'Bethlehem Area School District', confidence: 'high', evidence: null }
+  extraction.parcel_number = { value: '642702833391', confidence: 'high', evidence: null }
+  extraction.service_address = { value: '610 S Bergen Street, Fountain Hill, PA 18015', confidence: 'high', evidence: null }
+  extraction.amount_due = { value: 1756.51, confidence: 'high', evidence: null }
+  extraction.due_date = { value: '2026-10-31', confidence: 'high', evidence: null }
+  extraction.likely_category = { value: 'school_tax', confidence: 'high', evidence: null }
+  extraction.direction = { value: 'payable', confidence: 'high', evidence: null }
+
+  const installments = [
+    { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4' },
+    { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4' },
+    { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4' },
+    { amount: 439.12, due_date: '2026-12-07', description: 'Installment 4 of 4' },
+  ]
+
+  extraction.proposed_actions = [
+    {
+      type: 'obligation',
+      direction: 'payable',
+      category: 'school_tax',
+      description: 'School tax bill',
+      expected_amount: 1756.51,
+      due_date: '2026-10-31',
+      action_due_date: null,
+      period_start: null,
+      period_end: null,
+      title: null,
+      payment_options: [
+        {
+          option_type: 'installment_plan',
+          amount: 1756.51,
+          due_date: '2026-10-31',
+          description: 'Four installments',
+          discount_amount: null,
+          penalty_amount: null,
+          penalty_date: null,
+          installments,
+          // intentionally omit option-level late_payment_terms and installment-level late_payment_terms
+        },
+      ],
+    },
+  ]
+
+  return extraction
 }
 
 const proposedMatch: DocumentMatch = {
@@ -308,5 +359,34 @@ describe('DocumentReviewForm payment selection', () => {
 
     const confirmButton = screen.getByRole('button', { name: /Confirm/i }) as HTMLButtonElement
     expect(confirmButton.disabled).toBe(true)
+  })
+
+  it('renders with a legacy extraction missing late_payment_terms and keeps payment choices usable', () => {
+    const legacyRaw = makeLegacyExtractionRaw()
+    const extraction = parseExtractionOrEmpty(legacyRaw)
+
+    const { container } = render(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={extraction}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+
+    expect(container.textContent).toContain('Four installments')
+    const option = extraction.proposed_actions[0].payment_options[0]
+    expect(option.late_payment_terms).toEqual([])
+    expect(option.installments[0].late_payment_terms).toEqual([])
+
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+    expect(radios).toHaveLength(1)
+    fireEvent.click(radios[0])
+
+    const hiddenInput = container.querySelector('input[name="selected_payment_option_index"]') as HTMLInputElement
+    expect(hiddenInput.value).toBe('0')
   })
 })

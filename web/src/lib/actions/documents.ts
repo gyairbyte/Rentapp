@@ -99,9 +99,9 @@ export async function getDocumentWithDetails(id: string) {
   if (documentResult.error || !documentResult.data) return null
 
   const run = runResult.data?.[0] ?? null
-  const extraction: DocumentExtraction =
-    run?.normalized_extraction ??
-    parseExtractionOrEmpty(tryParseRaw(documentResult.data.raw_ai_extraction))
+  const extraction: DocumentExtraction = parseExtractionOrEmpty(
+    run?.normalized_extraction ?? tryParseRaw(documentResult.data.raw_ai_extraction)
+  )
 
   const proposedMatch = findDocumentMatch(extraction, {
     fileBuffer: Buffer.from(''),

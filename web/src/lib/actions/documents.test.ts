@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { confirmDocument } from './documents'
+import { confirmDocument, getDocumentWithDetails } from './documents'
+import { emptyExtraction } from '@/lib/document-intelligence/extraction-schema'
 
 vi.mock('@/lib/actions/helpers', () => ({
   requireUser: vi.fn(),
@@ -132,11 +133,64 @@ function makeTaxExtraction(): DocumentExtraction {
   })
 }
 
+function makeLegacyExtractionRaw(): unknown {
+  const extraction: Record<string, unknown> = { ...emptyExtraction() }
+  extraction.document_type = 'school_tax'
+  extraction.document_class = 'financial'
+  extraction.requires = 'money'
+  extraction.issuer = { value: 'Bethlehem Area School District', confidence: 'high', evidence: null }
+  extraction.parcel_number = { value: '642702833391', confidence: 'high', evidence: null }
+  extraction.service_address = { value: '610 S Bergen Street, Fountain Hill, PA 18015', confidence: 'high', evidence: null }
+  extraction.amount_due = { value: 1756.51, confidence: 'high', evidence: null }
+  extraction.due_date = { value: '2026-10-31', confidence: 'high', evidence: null }
+  extraction.likely_category = { value: 'school_tax', confidence: 'high', evidence: null }
+  extraction.direction = { value: 'payable', confidence: 'high', evidence: null }
+
+  const installments = [
+    { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4' },
+    { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4' },
+    { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4' },
+    { amount: 439.12, due_date: '2026-12-07', description: 'Installment 4 of 4' },
+  ]
+
+  const paymentOptions = [
+    {
+      option_type: 'installment_plan',
+      amount: 1756.51,
+      due_date: '2026-10-31',
+      description: 'Four installments',
+      discount_amount: null,
+      penalty_amount: null,
+      penalty_date: null,
+      // intentionally omit late_payment_terms and installment-level late_payment_terms
+      installments,
+    },
+  ]
+
+  extraction.proposed_actions = [
+    {
+      type: 'obligation',
+      direction: 'payable',
+      category: 'school_tax',
+      description: 'School tax bill',
+      expected_amount: 1756.51,
+      due_date: '2026-10-31',
+      action_due_date: null,
+      period_start: null,
+      period_end: null,
+      title: null,
+      payment_options: paymentOptions,
+    },
+  ]
+
+  return extraction
+}
+
 function makeSupabaseClient({
   extraction,
   rpcReturn,
 }: {
-  extraction?: DocumentExtraction
+  extraction?: unknown
   rpcReturn?: { data?: unknown; error?: { message: string } | null }
 }) {
   const documentRow = {
@@ -156,9 +210,14 @@ function makeSupabaseClient({
 
   function mockFrom(table: string) {
     let single = false
+    let neqCalled = false
     const builder = {
       select: vi.fn(() => builder),
       eq: vi.fn(() => builder),
+      neq: vi.fn(() => {
+        neqCalled = true
+        return builder
+      }),
       order: vi.fn(() => builder),
       limit: vi.fn(() => builder),
       single: vi.fn(() => {
@@ -167,12 +226,15 @@ function makeSupabaseClient({
       }),
       returns: vi.fn(() => {
         if (table === 'documents') {
-          return Promise.resolve(single ? { data: documentRow, error: null } : { data: [documentRow], error: null })
+          if (single) {
+            return Promise.resolve({ data: documentRow, error: null })
+          }
+          return Promise.resolve({ data: neqCalled ? [] : [documentRow], error: null })
         }
         if (table === 'document_processing_runs') {
           return Promise.resolve({ data: runRows, error: null })
         }
-        return Promise.resolve({ data: null, error: null })
+        return Promise.resolve({ data: [], error: null })
       }),
     }
     return builder
@@ -401,5 +463,28 @@ describe('confirmDocument', () => {
     expect(args.p_payment_options[2].option_type).toBe('full')
     expect(args.p_amount).toBe(1756.51)
     expect(args.p_due_date).toBe('2026-10-31')
+  })
+})
+
+describe('getDocumentWithDetails', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(requireUser as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'u-1' })
+  })
+
+  it('normalizes legacy processing-run extraction missing late_payment_terms arrays', async () => {
+    const legacyRaw = makeLegacyExtractionRaw()
+    const client = makeSupabaseClient({ extraction: legacyRaw })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await getDocumentWithDetails('d-1')
+
+    expect(result).not.toBeNull()
+    const extraction = result!.extraction
+    expect(extraction.proposed_actions).toHaveLength(1)
+    const option = extraction.proposed_actions[0].payment_options[0]
+    expect(option.late_payment_terms).toEqual([])
+    expect(option.installments).toHaveLength(4)
+    expect(option.installments[0].late_payment_terms).toEqual([])
   })
 })
