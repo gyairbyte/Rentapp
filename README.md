@@ -71,7 +71,7 @@ npm run dev
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — your Supabase anon key.
    - `NEXT_PUBLIC_SITE_URL` — the production domain (e.g., `https://rentapp.example.com`).
    - `OPENAI_API_KEY` — your server-side OpenAI key for document extraction.
-   - `DOCUMENT_AI_MODEL` — model to use, e.g., `gpt-5.6-terra` (defaults to `gpt-5.6-terra`).
+   - `DOCUMENT_AI_MODEL` — public OpenAI Responses API vision model, e.g., `gpt-4.1` (defaults to `gpt-4.1`).
    - Vercel automatically provides `NEXT_PUBLIC_VERCEL_URL` for preview deployments.
 4. In your Supabase project, add the Vercel production and preview domains under **Authentication → URL Configuration**:
    - Site URL: `https://your-production-domain.vercel.app`

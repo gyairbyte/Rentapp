@@ -1,20 +1,5 @@
 -- Document Intelligence phase schema additions
-
--- Extend documents with processing metadata and review linkage
-alter table public.documents
-  add column if not exists file_hash text,
-  add column if not exists file_size bigint,
-  add column if not exists processing_error text,
-  add column if not exists account_id uuid null references public.accounts(id) on delete set null,
-  add column if not exists party_id uuid null references public.parties(id) on delete set null,
-  add column if not exists confirmed_obligation_id uuid null references public.obligations(id) on delete set null,
-  add column if not exists confirmed_task_id uuid null references public.tasks(id) on delete set null,
-  add column if not exists duplicate_of_document_id uuid null references public.documents(id) on delete set null;
-
--- Exact duplicate prevention per user by file hash
-create unique index if not exists documents_user_file_hash_unique
-  on public.documents (user_id, file_hash)
-  where file_hash is not null;
+-- Order matters: create tasks before adding documents.confirmed_task_id; obligations already exists.
 
 -- Document processing runs (auditable, supports retries)
 create table if not exists public.document_processing_runs (
@@ -75,6 +60,11 @@ create table if not exists public.tasks (
   updated_at timestamptz not null default now()
 );
 
+-- Idempotency / concurrency guard: one task per source document per user.
+create unique index if not exists tasks_source_document_id_unique
+  on public.tasks (source_document_id)
+  where source_document_id is not null;
+
 alter table public.tasks enable row level security;
 
 create policy "Users can view own tasks"
@@ -114,9 +104,30 @@ create trigger tasks_updated_at
   for each row
   execute function public.handle_updated_at();
 
+-- Extend documents with processing metadata and review linkage (after tasks exists)
+alter table public.documents
+  add column if not exists file_hash text,
+  add column if not exists file_size bigint,
+  add column if not exists processing_error text,
+  add column if not exists account_id uuid null references public.accounts(id) on delete set null,
+  add column if not exists party_id uuid null references public.parties(id) on delete set null,
+  add column if not exists confirmed_obligation_id uuid null references public.obligations(id) on delete set null,
+  add column if not exists confirmed_task_id uuid null references public.tasks(id) on delete set null,
+  add column if not exists duplicate_of_document_id uuid null references public.documents(id) on delete set null;
+
+-- Exact duplicate prevention per user by file hash
+create unique index if not exists documents_user_file_hash_unique
+  on public.documents (user_id, file_hash)
+  where file_hash is not null;
+
 -- Link obligations and payments back to source documents
 alter table public.obligations
   add column if not exists source_document_id uuid null references public.documents(id) on delete set null;
+
+-- Idempotency / concurrency guard: one obligation per source document per user.
+create unique index if not exists obligations_source_document_id_unique
+  on public.obligations (source_document_id)
+  where source_document_id is not null;
 
 alter table public.payments
   add column if not exists evidence_document_id uuid null references public.documents(id) on delete set null;

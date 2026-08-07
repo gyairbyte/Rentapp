@@ -1,11 +1,10 @@
 import OpenAI from 'openai'
-import { toFile } from 'openai/uploads'
 import type { DocumentIntelligenceProvider, DocumentAnalysisInput, AnalyzedDocument } from './types'
-import { emptyExtraction, parseExtraction, documentExtractionJsonSchema } from './extraction-schema'
+import { parseExtraction, documentExtractionJsonSchema } from './extraction-schema'
 import { findDocumentMatch } from './matching'
 
 function getModel() {
-  return process.env.DOCUMENT_AI_MODEL ?? 'gpt-5.6-terra'
+  return process.env.DOCUMENT_AI_MODEL ?? 'gpt-4.1'
 }
 
 function buildPrompt() {
@@ -42,9 +41,7 @@ export const openaiDocumentIntelligenceProvider: DocumentIntelligenceProvider = 
     const model = getModel()
     const startedAt = Date.now()
 
-    let fileContent:
-      | { type: 'input_image'; image_url: string; detail: 'auto' }
-      | { type: 'input_file'; file_id: string }
+    let fileContent: OpenAI.Responses.ResponseInputContent
 
     if (isImageMime(input.mimeType)) {
       const base64 = input.fileBuffer.toString('base64')
@@ -54,70 +51,65 @@ export const openaiDocumentIntelligenceProvider: DocumentIntelligenceProvider = 
         detail: 'auto',
       }
     } else if (isPdfMime(input.mimeType)) {
-      const file = await toFile(input.fileBuffer, input.filename, { type: 'application/pdf' })
-      const uploaded = await client.files.create({ file, purpose: 'user_data' })
-      fileContent = { type: 'input_file', file_id: uploaded.id }
+      const base64 = input.fileBuffer.toString('base64')
+      fileContent = {
+        type: 'input_file',
+        filename: input.filename,
+        file_data: `data:${input.mimeType};base64,${base64}`,
+        detail: 'auto',
+      }
     } else {
       throw new Error(`Unsupported document MIME type for AI analysis: ${input.mimeType}`)
     }
 
-    const messageContent = [
-      { type: 'input_text' as const, text: buildPrompt() },
-      fileContent,
-    ]
-
-    try {
-      const response = await client.responses.create({
-        model,
-        input: [{ role: 'user', content: messageContent }],
-        text: {
-          format: {
-            type: 'json_schema',
-            name: documentExtractionJsonSchema.name,
-            schema: documentExtractionJsonSchema.schema as unknown as Record<string, unknown>,
-            strict: documentExtractionJsonSchema.strict,
-          },
+    const response = await client.responses.create({
+      model,
+      input: [{ role: 'user', content: [{ type: 'input_text' as const, text: buildPrompt() }, fileContent] }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: documentExtractionJsonSchema.name,
+          schema: documentExtractionJsonSchema.schema as Record<string, unknown>,
+          strict: documentExtractionJsonSchema.strict,
         },
-        store: false,
-      })
+      },
+      store: false,
+    })
 
-      const durationMs = Date.now() - startedAt
-      const textContent = response.output
-        .flatMap((o) => (o.type === 'message' && o.role === 'assistant' ? o.content : []))
-        .find((c) => c.type === 'output_text')
+    const durationMs = Date.now() - startedAt
 
-      let raw: unknown
-      try {
-        raw = JSON.parse(textContent?.text ?? '{}')
-      } catch {
-        raw = { rawText: textContent?.text ?? '' }
-      }
+    if (response.error) {
+      throw new Error(`OpenAI response error: ${response.error.message || 'unknown'}`)
+    }
 
-      const extraction = parseExtraction(raw)
-      const match = findDocumentMatch(extraction, input)
+    const rawText = response.output_text
+    if (!rawText) {
+      throw new Error('OpenAI returned no structured output text')
+    }
 
-      return {
-        extraction,
-        match,
-        provider: 'openai',
-        model,
-        inputTokens: response.usage?.input_tokens ?? null,
-        outputTokens: response.usage?.output_tokens ?? null,
-        durationMs,
-        rawOutput: response,
-      }
-    } catch (error) {
-      const durationMs = Date.now() - startedAt
-      return {
-        extraction: emptyExtraction(),
-        match: { property_id: null, account_id: null, party_id: null, reason: 'Analysis failed', confidence: 'low' },
-        provider: 'openai',
-        model,
-        inputTokens: null,
-        outputTokens: null,
-        durationMs,
-        rawOutput: error instanceof Error ? { error: error.message } : { error: 'Unknown error' },
-      }
+    let raw: unknown
+    try {
+      raw = JSON.parse(rawText)
+    } catch {
+      throw new Error('OpenAI response was not valid JSON')
+    }
+
+    const parsed = parseExtraction(raw)
+    if (!parsed) {
+      throw new Error('Could not parse structured extraction from OpenAI response')
+    }
+
+    const match = findDocumentMatch(parsed, input)
+
+    return {
+      extraction: parsed,
+      match,
+      provider: 'openai',
+      model,
+      inputTokens: response.usage?.input_tokens ?? null,
+      outputTokens: response.usage?.output_tokens ?? null,
+      durationMs,
+      rawOutput: response,
     }
   },
 }

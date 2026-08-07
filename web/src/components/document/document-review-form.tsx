@@ -5,12 +5,13 @@ import { useState } from 'react'
 import { confirmDocument, retryProcessDocument, archiveDocument } from '@/lib/actions/documents'
 import { Field, SelectField } from '@/components/ui/form'
 import { DOCUMENT_TYPES, DIRECTIONS, OBLIGATION_CATEGORIES } from '@/lib/constants'
-import type { Document, DocumentProcessingRun, DocumentExtraction } from '@/lib/types'
+import type { Document, DocumentExtraction, DocumentMatch } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
 
 export function DocumentReviewForm({
   document,
   extraction,
+  proposedMatch,
   properties,
   accounts,
   parties,
@@ -19,9 +20,9 @@ export function DocumentReviewForm({
 }: {
   document: Document
   extraction: DocumentExtraction
-  run: DocumentProcessingRun | null
+  proposedMatch: DocumentMatch
   properties: { id: string; nickname: string; street_address: string; city: string; state: string; zip: string }[]
-  accounts: { id: string; property_id: string; account_type: string; account_number: string | null }[]
+  accounts: { id: string; property_id: string; account_type: string; account_number: string | null; party_id?: string | null }[]
   parties: { id: string; property_id: string | null; name: string; party_type: string }[]
   duplicates: DuplicateResult[]
   processingError: string | null
@@ -33,10 +34,15 @@ export function DocumentReviewForm({
   const proposedObligation = extraction.proposed_actions.find((a) => a.type === 'obligation')
   const proposedTask = extraction.proposed_actions.find((a) => a.type === 'task')
 
-  const defaultPropertyId = document.property_id ?? ''
+  // High-confidence deterministic matches may be prefilled, but remain visibly reviewable.
+  const suggestedPropertyId = document.property_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.property_id : null)
+  const suggestedAccountId = document.account_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.account_id : null)
+  const suggestedPartyId = document.party_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.party_id : null)
 
-  const filteredAccounts = document.property_id ? accounts.filter((a) => a.property_id === document.property_id) : accounts
-  const filteredParties = document.property_id ? parties.filter((p) => p.property_id === document.property_id) : parties
+  const defaultPropertyId = suggestedPropertyId ?? ''
+
+  const filteredAccounts = defaultPropertyId ? accounts.filter((a) => a.property_id === defaultPropertyId) : accounts
+  const filteredParties = defaultPropertyId ? parties.filter((p) => p.property_id === defaultPropertyId || p.property_id === null) : parties
 
   async function handleConfirm(formData: FormData) {
     setIsPending(true)
@@ -94,6 +100,16 @@ export function DocumentReviewForm({
         </div>
       )}
 
+      {proposedMatch.confidence !== 'high' && proposedMatch.reason && (
+        <div className="rounded-lg border border-blue-300 p-4">
+          <h3 className="font-semibold">Suggested property/account</h3>
+          <p className="text-sm mt-1">{proposedMatch.reason} ({proposedMatch.confidence} confidence)</p>
+          <p className="text-sm text-foreground/70">
+            Please confirm or correct the property before confirming. A property is required.
+          </p>
+        </div>
+      )}
+
       {processingError && (
         <div className="rounded-lg border border-red-400 p-4">
           <p className="text-sm text-red-600">{processingError}</p>
@@ -121,13 +137,13 @@ export function DocumentReviewForm({
           name="account_id"
           label="Account (optional)"
           options={[{ value: '', label: '—' }, ...filteredAccounts.map((a) => ({ value: a.id, label: `${a.account_type.replace(/_/g, ' ')}${a.account_number ? ` · ${a.account_number}` : ''}` }))]}
-          defaultValue={document.account_id ?? ''}
+          defaultValue={suggestedAccountId ?? ''}
         />
         <SelectField
           name="party_id"
           label="Provider / party (optional)"
           options={[{ value: '', label: '—' }, ...filteredParties.map((p) => ({ value: p.id, label: p.name }))]}
-          defaultValue={document.party_id ?? ''}
+          defaultValue={suggestedPartyId ?? ''}
         />
       </section>
 

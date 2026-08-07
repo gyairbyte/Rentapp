@@ -11,7 +11,7 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
   const details = await getDocumentWithDetails(id)
   if (!details) notFound()
 
-  const { document, extraction, run, properties, accounts, parties, duplicates } = details
+  const { document, extraction, run, proposedMatch, properties, accounts, parties, duplicates } = details
   const signedUrl = await getSignedDocumentUrl(document.storage_path)
 
   const isProcessed = document.processing_status === 'processed'
@@ -53,7 +53,7 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
         <DocumentReviewForm
           document={document}
           extraction={extraction}
-          run={run}
+          proposedMatch={proposedMatch}
           properties={properties}
           accounts={accounts}
           parties={parties}

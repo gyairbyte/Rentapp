@@ -50,6 +50,16 @@ function providerNameMatch(name1: string | null | undefined, name2: string | nul
   return a.includes(b) || b.includes(a)
 }
 
+function accountProviderMatches(
+  account: DocumentAnalysisInput['userAccounts'][number],
+  providerName: string,
+  userParties: DocumentAnalysisInput['userParties']
+): boolean {
+  if (!account.party_id) return false
+  const party = userParties.find((p) => p.id === account.party_id)
+  return party ? providerNameMatch(party.name, providerName) : false
+}
+
 export function findDocumentMatch(
   extraction: DocumentExtraction,
   input: DocumentAnalysisInput
@@ -69,7 +79,7 @@ export function findDocumentMatch(
       return {
         property_id: account.property_id,
         account_id: account.id,
-        party_id: null,
+        party_id: account.party_id,
         reason: 'Matched by exact account number',
         confidence: 'high',
       }
@@ -97,35 +107,40 @@ export function findDocumentMatch(
 
   // 4. Provider + account-number suffix
   if (providerName && accountSuffix) {
-    const account = input.userAccounts.find((a) => {
+    const matchingAccounts = input.userAccounts.filter((a) => {
       const normalizedAccountNum = normalize(a.account_number)
       const suffixMatch = normalizedAccountNum && normalizedAccountNum.endsWith(accountSuffix)
-      return suffixMatch
+      return suffixMatch && accountProviderMatches(a, providerName, input.userParties)
     })
-    if (account) {
+    if (matchingAccounts.length === 1) {
+      const account = matchingAccounts[0]
       return {
         property_id: account.property_id,
         account_id: account.id,
-        party_id: null,
+        party_id: account.party_id,
         reason: 'Matched by provider and account-number suffix',
         confidence: 'medium',
       }
     }
   }
 
-  // 5. Provider + any account of matching type
+  // 5. Provider + account type (only when a single account belongs to that provider and matches the category)
   if (providerName) {
-    const matchingTypeAccounts = input.userAccounts.filter((a) => {
-      const typeLabel = extraction.likely_category.value ?? extraction.document_type ?? ''
-      return typeLabel.toLowerCase().includes(a.account_type.toLowerCase()) || a.account_type.toLowerCase().includes(typeLabel.toLowerCase())
-    })
-    if (matchingTypeAccounts.length === 1) {
-      return {
-        property_id: matchingTypeAccounts[0].property_id,
-        account_id: matchingTypeAccounts[0].id,
-        party_id: null,
-        reason: 'Matched by provider and single account of likely type',
-        confidence: 'medium',
+    const typeLabel = extraction.likely_category.value ?? extraction.document_type ?? ''
+    if (typeLabel) {
+      const matchingAccounts = input.userAccounts.filter((a) => {
+        const typeMatches = typeLabel.toLowerCase().includes(a.account_type.toLowerCase()) || a.account_type.toLowerCase().includes(typeLabel.toLowerCase())
+        return typeMatches && accountProviderMatches(a, providerName, input.userParties)
+      })
+      if (matchingAccounts.length === 1) {
+        const account = matchingAccounts[0]
+        return {
+          property_id: account.property_id,
+          account_id: account.id,
+          party_id: account.party_id,
+          reason: 'Matched by provider and single account of likely type',
+          confidence: 'medium',
+        }
       }
     }
   }

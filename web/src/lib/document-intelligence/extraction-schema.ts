@@ -102,11 +102,14 @@ export function emptyExtraction(): DocumentExtraction {
   }
 }
 
-export function parseExtraction(raw: unknown): DocumentExtraction {
+export function parseExtraction(raw: unknown): DocumentExtraction | null {
+  if (raw === null || raw === undefined) return null
   const parsed = documentExtractionSchema.safeParse(raw)
-  if (parsed.success) return parsed.data
-  // If parsing fails, return a safe default so the document is still reviewable.
-  return emptyExtraction()
+  return parsed.success ? parsed.data : null
+}
+
+export function parseExtractionOrEmpty(raw: unknown): DocumentExtraction {
+  return parseExtraction(raw) ?? emptyExtraction()
 }
 
 function extractedJsonSchema(type: 'string' | 'number' | 'string | null' = 'string') {

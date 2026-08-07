@@ -30,7 +30,8 @@ function sameValue(a: string | null | undefined, b: string | null | undefined): 
 
 export function detectSemanticDuplicates(
   extraction: DocumentExtraction,
-  candidates: DuplicateCandidate[]
+  candidates: DuplicateCandidate[],
+  documentPropertyId: string | null
 ): DuplicateResult[] {
   const matches: DuplicateResult[] = []
 
@@ -59,12 +60,17 @@ export function detectSemanticDuplicates(
     }
 
     // property + amount + due date
-    if (candidate.property_id && sameValue(dueDate, candidate.due_date) && amountDue !== null && candidate.amount_due !== null && amountDue === candidate.amount_due) {
+    if (
+      documentPropertyId &&
+      candidate.property_id === documentPropertyId &&
+      sameValue(dueDate, candidate.due_date) &&
+      amountDue !== null &&
+      candidate.amount_due !== null &&
+      amountDue === candidate.amount_due
+    ) {
       matches.push({ candidate, reason: 'Same property, amount, and due date', confidence: 'medium' })
       continue
     }
-
-
   }
 
   return matches

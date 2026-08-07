@@ -6,9 +6,10 @@ import { createClient } from '@/lib/supabase/client'
 import { documentSchema } from '@/lib/validations/document'
 import { requireUser } from './helpers'
 import { formatZodErrors, recalcObligation } from '@/lib/utils'
-import { getDocumentIntelligenceProvider, parseExtraction, hashFileBuffer } from '@/lib/document-intelligence'
+import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, hashFileBuffer } from '@/lib/document-intelligence'
+import { findDocumentMatch } from '@/lib/document-intelligence/matching'
 import { detectSemanticDuplicates } from '@/lib/document-intelligence/duplicates'
-import type { Document, DocumentProcessingRun, DocumentExtraction, ObligationInsert, TaskInsert, DocumentProcessingRunInsert } from '@/lib/types'
+import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, ObligationInsert, TaskInsert, DocumentProcessingRunInsert } from '@/lib/types'
 
 type ActionResult =
   | { success: true; id?: string; duplicateDocumentId?: string }
@@ -20,6 +21,15 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
 function generateStoragePath(userId: string, filename: string) {
   const safeName = `${randomUUID()}-${filename.replace(/[^a-zA-Z0-9_.-]/g, '_')}`
   return `${userId}/${safeName}`
+}
+
+function tryParseRaw(raw: string | null): unknown {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
 }
 
 export async function getDocuments(): Promise<Document[]> {
@@ -81,21 +91,33 @@ export async function getDocumentWithDetails(id: string) {
       .limit(1)
       .returns<DocumentProcessingRun[]>(),
     supabase.from('properties').select('id, nickname, street_address, city, state, zip').eq('user_id', user.id).order('nickname', { ascending: true }),
-    supabase.from('accounts').select('id, property_id, account_type, account_number').eq('user_id', user.id),
+    supabase.from('accounts').select('id, property_id, account_type, account_number, party_id').eq('user_id', user.id),
     supabase.from('parties').select('id, property_id, name, party_type').eq('user_id', user.id),
   ])
 
   if (documentResult.error || !documentResult.data) return null
 
   const run = runResult.data?.[0] ?? null
-  const extraction: DocumentExtraction = run?.normalized_extraction ?? parseExtraction(null)
+  const extraction: DocumentExtraction =
+    run?.normalized_extraction ??
+    parseExtractionOrEmpty(tryParseRaw(documentResult.data.raw_ai_extraction))
 
-  const duplicateCandidates = await findDuplicateCandidates(supabase, user.id, id, extraction)
+  const proposedMatch = findDocumentMatch(extraction, {
+    fileBuffer: Buffer.from(''),
+    mimeType: documentResult.data.mime_type || 'application/octet-stream',
+    filename: documentResult.data.original_filename,
+    userProperties: propertiesResult.data ?? [],
+    userAccounts: accountsResult.data ?? [],
+    userParties: partiesResult.data ?? [],
+  })
+
+  const duplicateCandidates = await findDuplicateCandidates(supabase, user.id, id, extraction, proposedMatch.property_id)
 
   return {
     document: documentResult.data,
     run,
     extraction,
+    proposedMatch,
     properties: propertiesResult.data ?? [],
     accounts: accountsResult.data ?? [],
     parties: partiesResult.data ?? [],
@@ -107,11 +129,12 @@ async function findDuplicateCandidates(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   documentId: string,
-  extraction: DocumentExtraction
+  extraction: DocumentExtraction,
+  documentPropertyId: string | null
 ) {
   const { data, error } = await supabase
     .from('documents')
-    .select('id, original_filename, user_id, property_id, account_id, issuer, document_date, account_number:raw_ai_extraction->account_number->>value, amount_due:raw_ai_extraction->amount_due->>value, due_date:raw_ai_extraction->due_date->>value, invoice_number:raw_ai_extraction->invoice_number->>value')
+    .select('id, original_filename, user_id, property_id, account_id, issuer, document_date, raw_ai_extraction')
     .eq('user_id', userId)
     .neq('id', documentId)
     .order('created_at', { ascending: false })
@@ -119,15 +142,24 @@ async function findDuplicateCandidates(
 
   if (error || !data) return []
 
-  const typed = data.map((d) => ({
-    ...d,
-    account_number: d.account_number ? String(d.account_number) : null,
-    amount_due: d.amount_due ? Number(d.amount_due) : null,
-    due_date: d.due_date ? String(d.due_date) : null,
-    invoice_number: d.invoice_number ? String(d.invoice_number) : null,
-  })) as Parameters<typeof detectSemanticDuplicates>[1]
+  const typed = data.map((d) => {
+    const candidateExtraction = parseExtractionOrEmpty(tryParseRaw(d.raw_ai_extraction))
+    return {
+      id: d.id,
+      original_filename: d.original_filename,
+      user_id: d.user_id,
+      property_id: d.property_id,
+      account_id: d.account_id,
+      issuer: d.issuer ?? candidateExtraction.issuer.value,
+      document_date: d.document_date ?? candidateExtraction.document_date.value,
+      account_number: candidateExtraction.account_number.value,
+      amount_due: candidateExtraction.amount_due.value,
+      due_date: candidateExtraction.due_date.value,
+      invoice_number: candidateExtraction.invoice_number.value,
+    }
+  }) as Parameters<typeof detectSemanticDuplicates>[1]
 
-  return detectSemanticDuplicates(extraction, typed)
+  return detectSemanticDuplicates(extraction, typed, documentPropertyId)
 }
 
 export async function createDocument(formData: FormData): Promise<ActionResult> {
@@ -204,6 +236,7 @@ export async function createDocument(formData: FormData): Promise<ActionResult> 
   if (parsed.data.property_id) revalidatePath(`/properties/${parsed.data.property_id}`)
 
   // Begin synchronous processing immediately after upload.
+  // Processing failures do not roll back the persisted document; the user can retry from the review screen.
   await processDocument(data.id)
 
   return { success: true, id: data.id }
@@ -224,11 +257,15 @@ export async function processDocument(documentId: string): Promise<ActionResult>
   if (!document) return { error: 'Document not found' }
 
   // Persist processing state before calling the provider so failures are recoverable.
-  await supabase
+  const { error: processingUpdateError } = await supabase
     .from('documents')
     .update({ processing_status: 'processing', processing_error: null })
     .eq('id', documentId)
     .eq('user_id', user.id)
+
+  if (processingUpdateError) {
+    return { error: `Could not set processing state: ${processingUpdateError.message}` }
+  }
 
   const { data: fileData, error: downloadError } = await supabase.storage.from('documents').download(document.storage_path)
   if (downloadError) {
@@ -240,7 +277,7 @@ export async function processDocument(documentId: string): Promise<ActionResult>
 
   const [properties, accounts, parties] = await Promise.all([
     supabase.from('properties').select('id, nickname, street_address, city, state, zip').eq('user_id', user.id),
-    supabase.from('accounts').select('id, property_id, account_type, account_number').eq('user_id', user.id),
+    supabase.from('accounts').select('id, property_id, account_type, account_number, party_id').eq('user_id', user.id),
     supabase.from('parties').select('id, property_id, name, party_type').eq('user_id', user.id),
   ])
 
@@ -255,7 +292,16 @@ export async function processDocument(documentId: string): Promise<ActionResult>
     status: 'running',
   }
 
-  const { data: run } = await supabase.from('document_processing_runs').insert(runInsert).select('id').single()
+  const { data: run, error: runError } = await supabase
+    .from('document_processing_runs')
+    .insert(runInsert)
+    .select('id')
+    .single()
+
+  if (runError) {
+    await markFailed(documentId, supabase, user.id, `Could not record processing run: ${runError.message}`)
+    return { error: 'Could not record processing run' }
+  }
 
   try {
     const result = await provider.analyzeDocument({
@@ -267,7 +313,7 @@ export async function processDocument(documentId: string): Promise<ActionResult>
       userParties: parties.data ?? [],
     })
 
-    await supabase
+    const { error: runUpdateError } = await supabase
       .from('document_processing_runs')
       .update({
         completed_at: new Date().toISOString(),
@@ -278,25 +324,42 @@ export async function processDocument(documentId: string): Promise<ActionResult>
         normalized_extraction: result.extraction,
         raw_output: result.rawOutput,
       })
-      .eq('id', run?.id ?? '')
+      .eq('id', run.id)
       .eq('user_id', user.id)
 
-    await supabase
+    if (runUpdateError) {
+      await markFailed(documentId, supabase, user.id, `Could not update processing run: ${runUpdateError.message}`, run.id)
+      return { error: 'Could not update processing run' }
+    }
+
+    // Proposed matches are not persisted as confirmed relationships before review.
+    // Only a high-confidence deterministic match is promoted to a prefilled document value.
+    const documentUpdate: DocumentUpdate = {
+      processing_status: 'processed',
+      processing_error: null,
+      document_type: result.extraction.document_type ?? document.document_type,
+      issuer: result.extraction.issuer.value ?? document.issuer,
+      document_date: result.extraction.document_date.value ?? document.document_date,
+      raw_ai_extraction: JSON.stringify(result.extraction),
+      review_status: document.review_status === 'confirmed' ? document.review_status : 'needs_review',
+    }
+
+    if (result.match.confidence === 'high' && result.match.property_id) {
+      documentUpdate.property_id = result.match.property_id
+      documentUpdate.account_id = result.match.account_id
+      documentUpdate.party_id = result.match.party_id
+    }
+
+    const { error: documentUpdateError } = await supabase
       .from('documents')
-      .update({
-        processing_status: 'processed',
-        review_status: 'needs_review',
-        document_type: result.extraction.document_type ?? document.document_type,
-        issuer: result.extraction.issuer.value ?? document.issuer,
-        document_date: result.extraction.document_date.value ?? document.document_date,
-        property_id: result.match.property_id ?? document.property_id,
-        account_id: result.match.account_id ?? document.account_id,
-        party_id: result.match.party_id ?? document.party_id,
-        raw_ai_extraction: JSON.stringify(result.extraction),
-        processing_error: null,
-      })
+      .update(documentUpdate)
       .eq('id', documentId)
       .eq('user_id', user.id)
+
+    if (documentUpdateError) {
+      await markFailed(documentId, supabase, user.id, `Could not save extraction: ${documentUpdateError.message}`, run.id)
+      return { error: 'Could not save extraction' }
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown processing error'
     await markFailed(documentId, supabase, user.id, message, run?.id)
@@ -317,18 +380,23 @@ async function markFailed(
   message: string,
   runId?: string | null
 ) {
-  await supabase
-    .from('documents')
-    .update({ processing_status: 'failed', processing_error: message })
-    .eq('id', documentId)
-    .eq('user_id', userId)
+  const updates = await Promise.all([
+    supabase
+      .from('documents')
+      .update({ processing_status: 'failed', processing_error: message })
+      .eq('id', documentId)
+      .eq('user_id', userId),
+    runId
+      ? supabase
+          .from('document_processing_runs')
+          .update({ completed_at: new Date().toISOString(), status: 'failed', error_message: message })
+          .eq('id', runId)
+          .eq('user_id', userId)
+      : Promise.resolve({ error: null } as const),
+  ])
 
-  if (runId) {
-    await supabase
-      .from('document_processing_runs')
-      .update({ completed_at: new Date().toISOString(), status: 'failed', error_message: message })
-      .eq('id', runId)
-      .eq('user_id', userId)
+  if (updates[0].error) {
+    throw new Error(`Failed to mark document failed: ${updates[0].error.message}`)
   }
 }
 
@@ -377,20 +445,6 @@ export async function confirmDocument(documentId: string, formData: FormData): P
   const actionDueDate = fieldValue(formData, 'action_due_date')
   const taskTitle = fieldValue(formData, 'task_title')
 
-  // Save corrections to the document itself before creating downstream records.
-  await supabase
-    .from('documents')
-    .update({
-      property_id: propertyId,
-      account_id: accountId,
-      party_id: partyId,
-      document_type: documentType,
-      issuer,
-      document_date: documentDate,
-    })
-    .eq('id', documentId)
-    .eq('user_id', user.id)
-
   const shouldCreateObligation = amount !== null && amount > 0 && dueDate
   const shouldCreateTask = !!requiredAction || !!taskTitle
 
@@ -399,7 +453,7 @@ export async function confirmDocument(documentId: string, formData: FormData): P
 
   if (shouldCreateObligation) {
     const status = recalcObligation(0, amount, dueDate, 'upcoming')
-    const obligationBase = {
+    const obligationBase: ObligationInsert = {
       property_id: propertyId,
       account_id: accountId,
       party_id: partyId,
@@ -411,23 +465,27 @@ export async function confirmDocument(documentId: string, formData: FormData): P
       paid_amount: 0,
       due_date: dueDate,
       status,
-      paid_date: null as string | null,
+      paid_date: null,
       period_start: periodStart,
       period_end: periodEnd,
-      notes: null as string | null,
+      notes: null,
+      user_id: user.id,
     }
 
-    if (obligationId) {
-      await supabase.from('obligations').update(obligationBase).eq('id', obligationId).eq('user_id', user.id)
-    } else {
-      const obligationInsert = { ...obligationBase, user_id: user.id } as ObligationInsert
-      const { data: created } = await supabase.from('obligations').insert(obligationInsert).select('id').single()
-      if (created) obligationId = created.id
+    const { data: upsertedObligation, error: obligationError } = await supabase
+      .from('obligations')
+      .upsert(obligationBase, { onConflict: 'source_document_id' })
+      .select('id')
+      .single()
+
+    if (obligationError || !upsertedObligation) {
+      return { error: obligationError?.message ?? 'Failed to create or update obligation' }
     }
+    obligationId = upsertedObligation.id
   }
 
   if (shouldCreateTask) {
-    const taskBase = {
+    const taskBase: TaskInsert = {
       property_id: propertyId,
       party_id: partyId,
       source_document_id: documentId,
@@ -436,26 +494,41 @@ export async function confirmDocument(documentId: string, formData: FormData): P
       due_date: actionDueDate,
       status: 'open',
       priority: 'normal',
+      user_id: user.id,
     }
 
-    if (taskId) {
-      await supabase.from('tasks').update(taskBase).eq('id', taskId).eq('user_id', user.id)
-    } else {
-      const taskInsert = { ...taskBase, user_id: user.id } as TaskInsert
-      const { data: created } = await supabase.from('tasks').insert(taskInsert).select('id').single()
-      if (created) taskId = created.id
+    const { data: upsertedTask, error: taskError } = await supabase
+      .from('tasks')
+      .upsert(taskBase, { onConflict: 'source_document_id' })
+      .select('id')
+      .single()
+
+    if (taskError || !upsertedTask) {
+      return { error: taskError?.message ?? 'Failed to create or update task' }
     }
+    taskId = upsertedTask.id
   }
 
-  await supabase
+  // Only mark the document confirmed after downstream records are persisted.
+  const { error: documentUpdateError } = await supabase
     .from('documents')
     .update({
+      property_id: propertyId,
+      account_id: accountId,
+      party_id: partyId,
+      document_type: documentType,
+      issuer,
+      document_date: documentDate,
       review_status: 'confirmed',
       confirmed_obligation_id: obligationId,
       confirmed_task_id: taskId,
     })
     .eq('id', documentId)
     .eq('user_id', user.id)
+
+  if (documentUpdateError) {
+    return { error: documentUpdateError.message }
+  }
 
   revalidatePath('/documents')
   revalidatePath('/inbox')

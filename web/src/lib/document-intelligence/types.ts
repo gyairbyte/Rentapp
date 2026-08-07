@@ -28,6 +28,7 @@ export type DocumentAnalysisInput = {
     property_id: string
     account_type: string
     account_number: string | null
+    party_id: string | null
   }[]
   userParties: {
     id: string
