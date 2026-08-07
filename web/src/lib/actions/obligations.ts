@@ -53,6 +53,21 @@ export async function getObligationsForProperty(propertyId: string): Promise<Obl
   return getObligations({ propertyId, includeResolved: false })
 }
 
+export async function getObligationsForDocument(documentId: string): Promise<Obligation[]> {
+  const user = await requireUser()
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('obligations')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('source_document_id', documentId)
+    .order('due_date', { ascending: true })
+    .returns<Obligation[]>()
+
+  if (error) throw new Error(error.message)
+  return data ?? []
+}
+
 export async function createObligation(formData: FormData): Promise<ActionResult> {
   const parsed = obligationSchema.safeParse(Object.fromEntries(formData))
   if (!parsed.success) {

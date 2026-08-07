@@ -104,6 +104,7 @@ describe('parseExtraction', () => {
           period_start: null,
           period_end: null,
           title: null,
+          payment_options: [],
         },
       ],
     }

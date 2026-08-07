@@ -14,20 +14,20 @@ function d(value: 'payable' | 'receivable' | null, confidence: 'high' | 'medium'
   return { value, confidence, evidence }
 }
 
-function action(
-  type: 'obligation' | 'task' | 'none',
-  overrides: Partial<{
-    direction: 'payable' | 'receivable' | null
-    category: string | null
-    description: string | null
-    expected_amount: number | null
-    due_date: string | null
-    action_due_date: string | null
-    period_start: string | null
-    period_end: string | null
-    title: string | null
-  }> = {}
-) {
+type ActionOverrides = Partial<{
+  direction: 'payable' | 'receivable' | null
+  category: string | null
+  description: string | null
+  expected_amount: number | null
+  due_date: string | null
+  action_due_date: string | null
+  period_start: string | null
+  period_end: string | null
+  title: string | null
+  payment_options: import('@/lib/types').PaymentOption[]
+}>
+
+function action(type: 'obligation' | 'task' | 'none', overrides: ActionOverrides = {}) {
   return {
     type,
     direction: overrides.direction ?? null,
@@ -39,6 +39,7 @@ function action(
     period_start: overrides.period_start ?? null,
     period_end: overrides.period_end ?? null,
     title: overrides.title ?? null,
+    payment_options: overrides.payment_options ?? [],
   }
 }
 
@@ -124,6 +125,86 @@ function extractionForFilename(filename: string, input: DocumentAnalysisInput) {
           category: 'electricity_gas',
           expected_amount: 89.99,
           due_date: '2026-08-30',
+        }),
+      ],
+    }
+  }
+
+  if (name.includes('tax') || name.includes('school') || name.includes('bethlehem')) {
+    return {
+      document_type: 'school_tax',
+      document_class: 'financial' as const,
+      requires: 'money' as const,
+      issuer: s('Bethlehem Area School District', 'high', 'letterhead'),
+      account_number: s(null, 'low'),
+      account_number_suffix: s(null, 'low'),
+      invoice_number: s(null, 'low'),
+      parcel_number: s('642702833391', 'high', 'parcel_number'),
+      policy_number: s(null, 'low'),
+      service_address: s(address, 'medium', 'service_address'),
+      mailing_address: s(null, 'low'),
+      tenant_name: s(null, 'low'),
+      property_identifiers: s(property?.nickname ?? null, 'medium', 'property_nickname'),
+      document_date: s('2026-08-01', 'high', 'document_date'),
+      due_date: s('2026-10-31', 'high', 'due_date'),
+      service_period_start: s(null, 'low'),
+      service_period_end: s(null, 'low'),
+      amount_due: n(1756.51, 'high', 'amount_due'),
+      total_amount: n(1756.51, 'high', 'total_amount'),
+      previous_balance: n(0, 'low'),
+      payment_received: n(0, 'low'),
+      direction: d('payable', 'high', 'direction'),
+      likely_category: s('school_tax', 'high', 'category'),
+      required_action: s(null, 'low'),
+      action_due_date: s(null, 'low'),
+      notes: s(
+        'Pay 2026-2027 school real estate tax bill either in full by 10/31/2026, at a discount by 8/31/2026, or in up to four installments.',
+        'high',
+        'notes'
+      ),
+      proposed_actions: [
+        action('obligation', {
+          direction: 'payable',
+          category: 'school_tax',
+          expected_amount: 1756.51,
+          due_date: '2026-10-31',
+          payment_options: [
+            {
+              option_type: 'discounted',
+              amount: 1703.81,
+              due_date: '2026-08-31',
+              description: 'Full payment with discount by 8/31/2026',
+              discount_amount: 52.7,
+              penalty_amount: null,
+              penalty_date: null,
+              installments: [],
+            },
+            {
+              option_type: 'full',
+              amount: 1756.51,
+              due_date: '2026-10-31',
+              description: 'Full base payment by 10/31/2026',
+              discount_amount: null,
+              penalty_amount: 175.65,
+              penalty_date: '2026-11-01',
+              installments: [],
+            },
+            {
+              option_type: 'installment_plan',
+              amount: 1756.51,
+              due_date: '2026-10-31',
+              description: 'Four installment plan',
+              discount_amount: null,
+              penalty_amount: null,
+              penalty_date: null,
+              installments: [
+                { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4' },
+                { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4' },
+                { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4' },
+                { amount: 439.12, due_date: '2026-12-07', description: 'Installment 4 of 4' },
+              ],
+            },
+          ],
         }),
       ],
     }

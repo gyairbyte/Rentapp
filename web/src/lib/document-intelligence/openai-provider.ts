@@ -14,7 +14,8 @@ Do not invent service periods, amounts, or property information that is not show
 For financial documents, determine the direction (payable by the property owner vs. receivable by the owner, such as rent).
 Suggest the most likely Rentapp obligation category (rent, water, sewer, trash, electricity_gas, cable_internet, property_tax, school_tax, insurance, hoa, contractor_invoice, other).
 If the document requires nonfinancial action, include a clear required_action and action_due_date.
-List all proposed downstream actions in proposed_actions. Most documents will have one action. If a document implies both a payment and a task, include both. Use type "none" if the document does not require any action.`
+List all proposed downstream actions in proposed_actions. Most documents will have one action. If a document implies both a payment and a task, include both. Use type "none" if the document does not require any action.
+If a financial document offers multiple payment deadlines or options (for example: a discounted full-payment deadline, a base full-payment deadline, or an installment plan with multiple payments), represent every option in the obligation action's payment_options array. Each option must include option_type, amount, due_date, discount_amount, penalty_amount, penalty_date, and an installments array for installment plans. Do not collapse a multi-deadline notice into a single due date.`
 }
 
 function getOpenAIClient() {

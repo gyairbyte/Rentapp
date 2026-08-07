@@ -24,6 +24,23 @@ const extractedDirectionSchema = z.object({
   evidence: z.string().nullable(),
 })
 
+const paymentInstallmentSchema = z.object({
+  amount: z.number().nullable(),
+  due_date: z.string().nullable(),
+  description: z.string().nullable(),
+})
+
+const paymentOptionSchema = z.object({
+  option_type: z.enum(['full', 'discounted', 'installment_plan', 'other']),
+  amount: z.number().nullable(),
+  due_date: z.string().nullable(),
+  description: z.string().nullable(),
+  discount_amount: z.number().nullable(),
+  penalty_amount: z.number().nullable(),
+  penalty_date: z.string().nullable(),
+  installments: z.array(paymentInstallmentSchema),
+})
+
 const proposedActionSchema = z.object({
   type: z.enum(['obligation', 'task', 'none']),
   direction: z.enum(['payable', 'receivable']).nullable(),
@@ -35,6 +52,7 @@ const proposedActionSchema = z.object({
   period_start: z.string().nullable(),
   period_end: z.string().nullable(),
   title: z.string().nullable(),
+  payment_options: z.array(paymentOptionSchema),
 })
 
 export const documentExtractionSchema = z.object({
@@ -139,6 +157,36 @@ const directionJsonSchema = {
   additionalProperties: false,
 }
 
+const paymentInstallmentJsonSchema = {
+  type: 'object',
+  properties: {
+    amount: { type: ['number', 'null'] },
+    due_date: { type: ['string', 'null'] },
+    description: { type: ['string', 'null'] },
+  },
+  required: ['amount', 'due_date', 'description'],
+  additionalProperties: false,
+}
+
+const paymentOptionJsonSchema = {
+  type: 'object',
+  properties: {
+    option_type: { type: 'string', enum: ['full', 'discounted', 'installment_plan', 'other'] },
+    amount: { type: ['number', 'null'] },
+    due_date: { type: ['string', 'null'] },
+    description: { type: ['string', 'null'] },
+    discount_amount: { type: ['number', 'null'] },
+    penalty_amount: { type: ['number', 'null'] },
+    penalty_date: { type: ['string', 'null'] },
+    installments: {
+      type: 'array',
+      items: paymentInstallmentJsonSchema,
+    },
+  },
+  required: ['option_type', 'amount', 'due_date', 'description', 'discount_amount', 'penalty_amount', 'penalty_date', 'installments'],
+  additionalProperties: false,
+}
+
 const proposedActionJsonSchema = {
   type: 'object',
   properties: {
@@ -152,8 +200,12 @@ const proposedActionJsonSchema = {
     period_start: { type: ['string', 'null'] },
     period_end: { type: ['string', 'null'] },
     title: { type: ['string', 'null'] },
+    payment_options: {
+      type: 'array',
+      items: paymentOptionJsonSchema,
+    },
   },
-  required: ['type', 'direction', 'category', 'description', 'expected_amount', 'due_date', 'action_due_date', 'period_start', 'period_end', 'title'],
+  required: ['type', 'direction', 'category', 'description', 'expected_amount', 'due_date', 'action_due_date', 'period_start', 'period_end', 'title', 'payment_options'],
   additionalProperties: false,
 }
 

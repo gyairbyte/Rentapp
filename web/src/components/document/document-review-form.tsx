@@ -5,8 +5,23 @@ import { useState } from 'react'
 import { confirmDocument, retryProcessDocument, archiveDocument } from '@/lib/actions/documents'
 import { Field, SelectField } from '@/components/ui/form'
 import { DOCUMENT_TYPES, DIRECTIONS, OBLIGATION_CATEGORIES } from '@/lib/constants'
-import type { Document, DocumentExtraction, DocumentMatch } from '@/lib/types'
+import type { Document, DocumentExtraction, DocumentMatch, PaymentOption } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
+
+function formatCurrency(amount: number | null) {
+  if (amount === null || amount === undefined) return ''
+  return `$${Number(amount).toFixed(2)}`
+}
+
+function formatOptionSummary(option: PaymentOption) {
+  const parts: string[] = []
+  if (option.amount !== null) parts.push(formatCurrency(option.amount))
+  if (option.due_date) parts.push(`due ${option.due_date}`)
+  if (option.discount_amount !== null) parts.push(`discount ${formatCurrency(option.discount_amount)}`)
+  if (option.penalty_amount !== null) parts.push(`penalty ${formatCurrency(option.penalty_amount)}`)
+  if (parts.length > 0) return parts.join(' · ')
+  return option.description ?? option.option_type.replace(/_/g, ' ')
+}
 
 export function DocumentReviewForm({
   document,
@@ -31,6 +46,10 @@ export function DocumentReviewForm({
 
   const proposedObligation = extraction.proposed_actions.find((a) => a.type === 'obligation')
   const proposedTask = extraction.proposed_actions.find((a) => a.type === 'task')
+  const paymentOptions = proposedObligation?.payment_options ?? []
+  const hasPaymentOptions = paymentOptions.length > 0
+  const [selectedOptionIndex, setSelectedOptionIndex] = useState(0)
+  const selectedOption = hasPaymentOptions ? paymentOptions[selectedOptionIndex] : null
 
   // High-confidence deterministic matches may be prefilled, but remain visibly reviewable.
   const suggestedPropertyId = document.property_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.property_id : null)
@@ -41,6 +60,9 @@ export function DocumentReviewForm({
 
   const filteredAccounts = defaultPropertyId ? accounts.filter((a) => a.property_id === defaultPropertyId) : accounts
   const filteredParties = defaultPropertyId ? parties.filter((p) => p.property_id === defaultPropertyId || p.property_id === null) : parties
+
+  const derivedAmount = selectedOption?.amount ?? proposedObligation?.expected_amount ?? extraction.amount_due.value ?? ''
+  const derivedDueDate = selectedOption?.due_date ?? proposedObligation?.due_date ?? extraction.due_date.value ?? ''
 
   async function handleConfirm(formData: FormData) {
     setIsPending(true)
@@ -152,6 +174,51 @@ export function DocumentReviewForm({
         />
       </section>
 
+      {hasPaymentOptions && (
+        <section className="space-y-4 rounded-lg border p-4">
+          <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
+            This document contains multiple payment options and deadlines. Select the plan you intend to follow.
+          </div>
+          <input type="hidden" name="payment_options" value={JSON.stringify(paymentOptions)} />
+          <input type="hidden" name="selected_payment_option_index" value={selectedOptionIndex} />
+          <fieldset className="space-y-3">
+            <legend className="font-semibold">Payment options</legend>
+            {paymentOptions.map((option, idx) => (
+              <label
+                key={idx}
+                className={`block rounded-lg border p-3 cursor-pointer transition-colors ${
+                  selectedOptionIndex === idx ? 'border-foreground bg-foreground/5' : 'hover:bg-foreground/5'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="payment_option"
+                    value={idx}
+                    checked={selectedOptionIndex === idx}
+                    onChange={() => setSelectedOptionIndex(idx)}
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <p className="font-medium">{option.description ?? option.option_type.replace(/_/g, ' ')}</p>
+                    <p className="text-sm text-foreground/70">{formatOptionSummary(option)}</p>
+                    {option.option_type === 'installment_plan' && option.installments.length > 0 && (
+                      <ul className="text-sm text-foreground/70 mt-2 space-y-1 pl-4 list-disc">
+                        {option.installments.map((inst, i) => (
+                          <li key={i}>
+                            {inst.description ?? `Payment ${i + 1}`}: {formatCurrency(inst.amount)} due {inst.due_date}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </fieldset>
+        </section>
+      )}
+
       {extraction.requires !== 'neither' && (
         <section className="space-y-4 rounded-lg border p-4">
           <h2 className="text-lg font-semibold">Proposed obligation</h2>
@@ -172,19 +239,17 @@ export function DocumentReviewForm({
             label="Description"
             defaultValue={proposedObligation?.description ?? `${extraction.issuer.value ?? document.original_filename} — ${extraction.likely_category.value ?? ''}`}
           />
-          <Field
-            name="amount"
-            label="Amount due"
-            type="number"
-            step="0.01"
-            defaultValue={proposedObligation?.expected_amount ?? extraction.amount_due.value ?? ''}
-          />
-          <Field
-            name="due_date"
-            label="Due date"
-            type="date"
-            defaultValue={proposedObligation?.due_date ?? extraction.due_date.value ?? ''}
-          />
+          {hasPaymentOptions ? (
+            <>
+              <Field name="amount" label="Amount (set by selected payment option)" type="number" step="0.01" value={derivedAmount} readOnly />
+              <Field name="due_date" label="Due date (set by selected payment option)" type="date" value={derivedDueDate} readOnly />
+            </>
+          ) : (
+            <>
+              <Field name="amount" label="Amount due" type="number" step="0.01" defaultValue={derivedAmount} />
+              <Field name="due_date" label="Due date" type="date" defaultValue={derivedDueDate} />
+            </>
+          )}
           <Field
             name="period_start"
             label="Service period start (optional)"

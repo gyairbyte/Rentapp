@@ -250,3 +250,37 @@ describe('Provider failure handling', () => {
     await expect(provider.analyzeDocument(input)).rejects.toThrow('Provider failure')
   })
 })
+
+describe('Payment options extraction', () => {
+  it('extracts discount, base, and installment options for a school tax notice', async () => {
+    const provider = mockDocumentIntelligenceProvider
+    const input = {
+      fileBuffer: Buffer.from('tax notice'),
+      mimeType: 'application/pdf',
+      filename: 'Bethlehem_Area_School_District_2026_2027_tax_notice.pdf',
+      userProperties: properties,
+      userAccounts: accounts,
+      userParties: parties,
+    }
+    const result = await provider.analyzeDocument(input)
+    const proposedObligation = result.extraction.proposed_actions.find((a) => a.type === 'obligation')
+    expect(proposedObligation).toBeDefined()
+    expect(proposedObligation!.payment_options).toHaveLength(3)
+
+    const discount = proposedObligation!.payment_options.find((o) => o.option_type === 'discounted')
+    expect(discount).toBeDefined()
+    expect(discount!.due_date).toBe('2026-08-31')
+    expect(discount!.amount).toBe(1703.81)
+
+    const full = proposedObligation!.payment_options.find((o) => o.option_type === 'full')
+    expect(full).toBeDefined()
+    expect(full!.due_date).toBe('2026-10-31')
+    expect(full!.amount).toBe(1756.51)
+
+    const installment = proposedObligation!.payment_options.find((o) => o.option_type === 'installment_plan')
+    expect(installment).toBeDefined()
+    expect(installment!.installments).toHaveLength(4)
+    expect(installment!.installments[0].due_date).toBe('2026-08-03')
+    expect(installment!.installments[3].due_date).toBe('2026-12-07')
+  })
+})

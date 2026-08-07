@@ -204,6 +204,23 @@ export type DocumentUpdate = Partial<Omit<Document, 'id' | 'user_id' | 'created_
 
 export type Confidence = 'high' | 'medium' | 'low'
 
+export type PaymentInstallment = {
+  amount: number | null
+  due_date: string | null
+  description: string | null
+}
+
+export type PaymentOption = {
+  option_type: 'full' | 'discounted' | 'installment_plan' | 'other'
+  amount: number | null
+  due_date: string | null
+  description: string | null
+  discount_amount: number | null
+  penalty_amount: number | null
+  penalty_date: string | null
+  installments: PaymentInstallment[]
+}
+
 export type ExtractedField<T = string | number | null> = {
   value: T
   confidence: Confidence
@@ -221,6 +238,7 @@ export type ProposedAction = {
   period_start: string | null
   period_end: string | null
   title: string | null
+  payment_options: PaymentOption[]
 }
 
 export type DocumentExtraction = {

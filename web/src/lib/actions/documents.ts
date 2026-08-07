@@ -9,7 +9,7 @@ import { formatZodErrors } from '@/lib/utils'
 import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, hashFileBuffer } from '@/lib/document-intelligence'
 import { findDocumentMatch } from '@/lib/document-intelligence/matching'
 import { detectSemanticDuplicates } from '@/lib/document-intelligence/duplicates'
-import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert } from '@/lib/types'
+import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert, PaymentOption } from '@/lib/types'
 
 type ActionResult =
   | { success: true; id?: string; duplicateDocumentId?: string }
@@ -420,6 +420,39 @@ export async function confirmDocument(documentId: string, formData: FormData): P
   if (!propertyId) return { error: 'A property is required to confirm' }
 
   const amountRaw = fieldValue(formData, 'amount')
+  let selectedAmount = amountRaw ? Number(amountRaw) : null
+  let selectedDueDate = fieldValue(formData, 'due_date')
+
+  const paymentOptionsRaw = fieldValue(formData, 'payment_options')
+  const selectedPaymentOptionIndexRaw = fieldValue(formData, 'selected_payment_option_index')
+  let paymentOptions: PaymentOption[] | null = null
+  let selectedPaymentOptionIndex: number | null = null
+
+  if (paymentOptionsRaw && selectedPaymentOptionIndexRaw) {
+    try {
+      const parsed = JSON.parse(paymentOptionsRaw)
+      if (Array.isArray(parsed)) {
+        paymentOptions = parsed as PaymentOption[]
+        selectedPaymentOptionIndex = Number(selectedPaymentOptionIndexRaw)
+        if (
+          Number.isNaN(selectedPaymentOptionIndex) ||
+          selectedPaymentOptionIndex < 0 ||
+          selectedPaymentOptionIndex >= paymentOptions.length
+        ) {
+          return { error: 'Invalid payment option selection' }
+        }
+        const selected = paymentOptions[selectedPaymentOptionIndex]
+        if (selected.amount !== null && selected.amount !== undefined) {
+          selectedAmount = selected.amount
+        }
+        if (selected.due_date !== null && selected.due_date !== undefined) {
+          selectedDueDate = selected.due_date
+        }
+      }
+    } catch {
+      return { error: 'Invalid payment options' }
+    }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('confirm_document', {
@@ -431,16 +464,18 @@ export async function confirmDocument(documentId: string, formData: FormData): P
     p_document_type: fieldValue(formData, 'document_type'),
     p_issuer: fieldValue(formData, 'issuer'),
     p_document_date: fieldValue(formData, 'document_date'),
-    p_due_date: fieldValue(formData, 'due_date'),
+    p_due_date: selectedDueDate,
     p_period_start: fieldValue(formData, 'period_start'),
     p_period_end: fieldValue(formData, 'period_end'),
-    p_amount: amountRaw ? Number(amountRaw) : null,
+    p_amount: selectedAmount,
     p_direction: (fieldValue(formData, 'direction') as 'payable' | 'receivable') ?? 'payable',
     p_category: fieldValue(formData, 'category') ?? 'other',
     p_description: fieldValue(formData, 'description'),
     p_required_action: fieldValue(formData, 'required_action'),
     p_action_due_date: fieldValue(formData, 'action_due_date'),
     p_task_title: fieldValue(formData, 'task_title'),
+    p_payment_options: paymentOptions,
+    p_selected_payment_option_index: selectedPaymentOptionIndex,
   })
 
   if (error) {
