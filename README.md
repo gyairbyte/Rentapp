@@ -2,7 +2,7 @@
 
 A personal rental-property operations system that makes it difficult for a property-related obligation to be forgotten.
 
-This repository contains the **Core MVP** built on the Ticket 001 foundation: auth, responsive app shell, property CRUD, parties, property accounts, obligations, payments, recurring obligations, documents, and an actionable dashboard.
+This repository contains the Core MVP plus the **Document Intelligence** phase: document capture/upload, AI extraction, review, confirmation into obligations/tasks, and inbox tracking.
 
 ## Tech stack
 
@@ -14,6 +14,7 @@ This repository contains the **Core MVP** built on the Ticket 001 foundation: au
 - Zod for form validation
 - Vitest for unit tests
 - ESLint 9 with flat config
+- OpenAI Responses API for multimodal document extraction (pluggable provider interface)
 
 ## Project structure
 
@@ -43,7 +44,8 @@ Rentapp/
 │   └── supabase/migrations/
 │       ├── 001_ticket_001.sql
 │       ├── 002_core_mvp.sql
-│       └── 003_foreign_key_rls.sql
+│       ├── 003_foreign_key_rls.sql
+│       └── 004_document_intelligence.sql
 ```
 
 ## Getting started
@@ -68,6 +70,8 @@ npm run dev
    - `NEXT_PUBLIC_SUPABASE_URL` — your Supabase project URL.
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — your Supabase anon key.
    - `NEXT_PUBLIC_SITE_URL` — the production domain (e.g., `https://rentapp.example.com`).
+   - `OPENAI_API_KEY` — your server-side OpenAI key for document extraction.
+   - `DOCUMENT_AI_MODEL` — model to use, e.g., `gpt-5.6-terra` (defaults to `gpt-5.6-terra`).
    - Vercel automatically provides `NEXT_PUBLIC_VERCEL_URL` for preview deployments.
 4. In your Supabase project, add the Vercel production and preview domains under **Authentication → URL Configuration**:
    - Site URL: `https://your-production-domain.vercel.app`
@@ -77,12 +81,13 @@ npm run dev
 
 ## Security notes
 
-- Row-level security (RLS) is enabled on all user-owned tables (`properties`, `parties`, `accounts`, `obligations`, `payments`, `recurring_rules`, `documents`).
-- RLS `WITH CHECK` policies on insert/update additionally validate that referenced foreign keys (`property_id`, `account_id`, `party_id`, `recurring_rule_id`, `obligation_id`) belong to the current user, preventing cross-user relationship tampering.
+- Row-level security (RLS) is enabled on all user-owned tables (`properties`, `parties`, `accounts`, `obligations`, `payments`, `recurring_rules`, `documents`, `document_processing_runs`, `tasks`).
+- RLS `WITH CHECK` policies on insert/update additionally validate that referenced foreign keys (`property_id`, `account_id`, `party_id`, `recurring_rule_id`, `obligation_id`, `source_document_id`, `confirmed_obligation_id`, `confirmed_task_id`) belong to the current user, preventing cross-user relationship tampering.
 - The `documents` Supabase Storage bucket is private.
-- Server-only credentials (`SUPABASE_SERVICE_ROLE_KEY`) are not referenced by the app code and should not be committed.
+- Server-only credentials (`SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`) are not referenced by the app code and should not be committed.
 - `NEXT_PUBLIC_*` keys are public by design; the actual Supabase access is gated by RLS and authenticated sessions.
 - `/seed` is disabled in production (both the route and the server action).
+- OpenAI API calls run only in server actions; document buffers are downloaded from private Supabase Storage, sent to OpenAI, and the original file is preserved unchanged.
 
 ## Core MVP features
 
@@ -94,8 +99,14 @@ npm run dev
 - **Recurring obligations** — monthly/quarterly/semiannual/annual rules that generate individual obligations and avoid duplicates.
 - **Basic rent tracking** — expected rent, received rent, outstanding balance.
 - **Dashboard** — Needs Attention, This Month, Upcoming, and Properties summaries.
-- **Global Add flow** — mobile-optimized entry point for property, bill, payment, recurring rule, party, and document placeholders.
-- **Documents foundation** — manual upload to private Supabase Storage and document listing.
+- **Global Add flow** — mobile-optimized entry point for property, bill, payment, recurring rule, party, and document upload.
+- **Documents** — mobile capture (photo/PDF), SHA-256 exact duplicate detection, private Supabase Storage, processing status tracking, and document listing.
+- **Document Intelligence** — OpenAI Responses API extraction behind a provider-neutral interface; structured schema with confidence per field.
+- **Review & confirm** — side-by-side document and proposed fields; edit, confirm (idempotent), retry processing, or archive.
+- **Inbox** — queues documents by Needs Review, Processing, Failed, and Recently Confirmed.
+- **Task creation** — nonfinancial actions from documents become tasks with due dates.
+- **AI cost/audit metadata** — every processing run records provider, model, tokens, duration, and raw output in `document_processing_runs`.
+- **Semantic duplicate warnings** — provider+account+statement date, invoice number, and property+amount+due date.
 - **Seed data** — `/seed` creates demo properties, tenants, accounts, recurring rules, obligations, and payments.
 
 ## Migrations
@@ -103,6 +114,7 @@ npm run dev
 - `001_ticket_001.sql` — `properties` table, `handle_updated_at` trigger, initial RLS.
 - `002_core_mvp.sql` — `archived` column, `parties`, `accounts`, `recurring_rules`, `obligations`, `payments`, `documents`, unique index preventing duplicate generated obligations, storage bucket/RLS, and updated-at triggers.
 - `003_foreign_key_rls.sql` — FK ownership checks in RLS `WITH CHECK` policies to prevent cross-user relationships.
+- `004_document_intelligence.sql` — document processing states, `document_processing_runs`, `tasks`, file hash/duplicate detection, `source_document_id` links, and updated RLS policies.
 
 ## Recurring rule edit behavior
 
@@ -117,16 +129,8 @@ This keeps historical/payment records intact while ensuring upcoming expected ob
 
 ## Known limitations / deferred functionality
 
-- AI/OCR, automatic document classification, and extraction are intentionally not implemented.
 - Bank syncing and automatic bill payment are out of scope.
 - Full lease management (lease terms, move-in/move-out, etc.) is deferred.
 - Repairs are currently a placeholder category; a full work-order workflow is future work.
-- Document review UI is a basic manual form; the review-extract-confirm flow will be built in the Document Intelligence phase.
-
-## Recommended next phase: Document Intelligence
-
-- Add an OCR + multimodal extraction layer behind a stable application interface.
-- Implement the review screen that displays the original document next to extracted fields (property, type, provider, account, amount, due date, service period, required action) with low-confidence highlighting.
-- Use property/account data to pre-match documents to properties.
-- Generate obligations/tasks from approved document extractions.
-- Add expected-obligation gap detection (e.g., a quarterly water bill that never arrived).
+- Expected-obligation gap detection (e.g., a quarterly water bill that never arrived) is a future enhancement.
+- Only OpenAI is implemented as a document intelligence provider; the interface is ready for additional providers.

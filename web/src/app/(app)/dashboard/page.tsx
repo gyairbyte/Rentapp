@@ -29,17 +29,17 @@ export default async function DashboardPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <AttentionCard
             title="Overdue bills"
-            items={data.needsAttention.overdueBills}
+            items={data.needsAttention.overdueBills.map((o) => ({ ...o, href: `/obligations/${o.id}` }))}
             empty="No overdue bills"
           />
           <AttentionCard
             title="Overdue rent"
-            items={data.needsAttention.overdueRent}
+            items={data.needsAttention.overdueRent.map((o) => ({ ...o, href: `/obligations/${o.id}` }))}
             empty="No overdue rent"
           />
           <AttentionCard
             title="Due soon"
-            items={data.needsAttention.dueSoon}
+            items={data.needsAttention.dueSoon.map((o) => ({ ...o, href: `/obligations/${o.id}` }))}
             empty="Nothing due soon"
           />
         </div>
@@ -91,6 +91,51 @@ export default async function DashboardPage() {
       </section>
 
       <section>
+        <h2 className="text-lg font-semibold mb-3">Documents & tasks</h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <AttentionCard
+            title="Needs review"
+            items={data.documents.filter((d) => d.review_status === 'needs_review').map((d) => ({
+              id: d.id,
+              description: d.original_filename,
+              category: 'Document',
+              due_date: '',
+              expected_amount: 0,
+              paid_amount: 0,
+              href: `/documents/${d.id}/review`,
+            }))}
+            empty="No documents need review"
+          />
+          <AttentionCard
+            title="Processing failed"
+            items={data.documents.filter((d) => d.processing_status === 'failed').map((d) => ({
+              id: d.id,
+              description: d.original_filename,
+              category: 'Document',
+              due_date: '',
+              expected_amount: 0,
+              paid_amount: 0,
+              href: `/documents/${d.id}/review`,
+            }))}
+            empty="No failed processing"
+          />
+          <AttentionCard
+            title="Tasks due"
+            items={data.tasks.map((t) => ({
+              id: t.id,
+              description: t.title,
+              category: 'Task',
+              due_date: t.due_date ?? '',
+              expected_amount: 0,
+              paid_amount: 0,
+              href: `/tasks/${t.id}`,
+            }))}
+            empty="No tasks due soon"
+          />
+        </div>
+      </section>
+
+      <section>
         <h2 className="text-lg font-semibold mb-3">Properties</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.properties.map((p) => (
@@ -129,7 +174,7 @@ function AttentionCard({
   empty,
 }: {
   title: string
-  items: { id: string; description: string | null; category: string; due_date: string; expected_amount: number; paid_amount: number }[]
+  items: { id: string; description: string | null; category: string; due_date: string; expected_amount: number; paid_amount: number; href?: string }[]
   empty: string
 }) {
   return (
@@ -141,12 +186,14 @@ function AttentionCard({
         <ul className="space-y-2">
           {items.map((item) => (
             <li key={item.id}>
-              <Link href={`/obligations/${item.id}`} className="text-sm hover:underline">
-                {item.description || item.category.replace(/_/g, ' ')} — due {item.due_date}
+              <Link href={item.href ?? `/obligations/${item.id}`} className="text-sm hover:underline">
+                {item.description || item.category.replace(/_/g, ' ')} {item.due_date ? `— due ${item.due_date}` : ''}
               </Link>
-              <p className="text-sm text-foreground/70">
-                {formatCurrency(item.expected_amount - item.paid_amount)} remaining
-              </p>
+              {item.expected_amount > 0 && (
+                <p className="text-sm text-foreground/70">
+                  {formatCurrency(item.expected_amount - item.paid_amount)} remaining
+                </p>
+              )}
             </li>
           ))}
         </ul>

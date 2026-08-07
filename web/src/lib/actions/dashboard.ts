@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { requireUser } from './helpers'
 import { toISODate, addDays, startOfMonth, endOfMonth } from './dates'
-import type { Obligation, Property } from '@/lib/types'
+import type { Obligation, Property, Document, Task } from '@/lib/types'
 
 export async function getDashboardData() {
   const user = await requireUser()
@@ -34,6 +34,27 @@ export async function getDashboardData() {
     .returns<Property[]>()
 
   if (propError) throw new Error(propError.message)
+
+  const { data: documents, error: docError } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('user_id', user.id)
+    .or('review_status.eq.needs_review,processing_status.eq.failed')
+    .order('created_at', { ascending: false })
+    .returns<Document[]>()
+
+  if (docError) throw new Error(docError.message)
+
+  const { data: tasks, error: taskError } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('user_id', user.id)
+    .not('status', 'in', '(completed,canceled)')
+    .or(`due_date.lte.${nextWeek},due_date.is.null`)
+    .order('due_date', { ascending: true, nullsFirst: false })
+    .returns<Task[]>()
+
+  if (taskError) throw new Error(taskError.message)
 
   const obligations = (rawObligations ?? []).filter(
     (o) => !['canceled', 'waived'].includes(o.status)
@@ -94,5 +115,7 @@ export async function getDashboardData() {
     },
     upcoming,
     properties,
+    documents: documents ?? [],
+    tasks: tasks ?? [],
   }
 }

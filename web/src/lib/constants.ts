@@ -82,24 +82,76 @@ export const PAYMENT_METHODS = [
 ]
 
 export const DOCUMENT_TYPES = [
+  { value: 'rent', label: 'Rent' },
+  { value: 'water', label: 'Water' },
+  { value: 'sewer', label: 'Sewer' },
+  { value: 'gas', label: 'Gas' },
+  { value: 'electric', label: 'Electric' },
+  { value: 'trash', label: 'Trash' },
+  { value: 'cable_internet', label: 'Cable / Internet' },
+  { value: 'property_tax', label: 'Property tax' },
+  { value: 'school_tax', label: 'School tax' },
+  { value: 'insurance', label: 'Insurance' },
+  { value: 'hoa', label: 'HOA' },
+  { value: 'contractor_invoice', label: 'Contractor invoice' },
+  { value: 'estimate', label: 'Estimate' },
+  { value: 'receipt', label: 'Receipt' },
+  { value: 'repair_notice', label: 'Repair notice / request' },
+  { value: 'inspection_notice', label: 'Inspection notice' },
+  { value: 'violation_notice', label: 'Violation / code notice' },
+  { value: 'permit', label: 'Permit / licensing' },
+  { value: 'tenant_correspondence', label: 'Tenant correspondence' },
+  { value: 'legal_correspondence', label: 'Legal / court correspondence' },
+  { value: 'general_letter', label: 'General letter' },
   { value: 'photograph', label: 'Photograph' },
   { value: 'pdf', label: 'PDF' },
-  { value: 'invoice', label: 'Invoice' },
-  { value: 'bill', label: 'Bill' },
-  { value: 'letter', label: 'Letter' },
-  { value: 'receipt', label: 'Receipt' },
   { value: 'other', label: 'Other' },
 ]
 
+export const DOCUMENT_CLASSES = [
+  { value: 'financial', label: 'Financial' },
+  { value: 'operational', label: 'Operational' },
+  { value: 'tenant', label: 'Tenant' },
+  { value: 'legal', label: 'Legal' },
+  { value: 'other', label: 'Other' },
+]
+
+export const REQUIRES_OPTIONS = [
+  { value: 'money', label: 'Money' },
+  { value: 'action', label: 'Action' },
+  { value: 'both', label: 'Both' },
+  { value: 'neither', label: 'Neither' },
+]
+
+export const CONFIDENCES = [
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+]
+
 export const PROCESSING_STATUSES = [
-  { value: 'pending', label: 'Pending' },
+  { value: 'uploaded', label: 'Uploaded' },
   { value: 'processing', label: 'Processing' },
-  { value: 'completed', label: 'Completed' },
+  { value: 'processed', label: 'Processed' },
   { value: 'failed', label: 'Failed' },
 ]
 
 export const REVIEW_STATUSES = [
-  { value: 'pending', label: 'Pending review' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'rejected', label: 'Rejected' },
+  { value: 'unreviewed', label: 'Unreviewed' },
+  { value: 'needs_review', label: 'Needs review' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'archived', label: 'Archived' },
+]
+
+export const TASK_STATUSES = [
+  { value: 'open', label: 'Open' },
+  { value: 'waiting', label: 'Waiting' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'canceled', label: 'Canceled' },
+]
+
+export const TASK_PRIORITIES = [
+  { value: 'low', label: 'Low' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'high', label: 'High' },
 ]
