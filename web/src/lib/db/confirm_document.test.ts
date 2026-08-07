@@ -85,7 +85,9 @@ async function callConfirm(
   return rows[0].result
 }
 
-describe('confirm_document multi-payment behavior', () => {
+const describeDb = process.env.TEST_DATABASE_URL ? describe : describe.skip
+
+describeDb('confirm_document multi-payment behavior', () => {
   let client: Client
   let ctx: DbContext
 
