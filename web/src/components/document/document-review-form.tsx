@@ -112,15 +112,23 @@ export function DocumentReviewForm({
 
       {processingError && (
         <div className="rounded-lg border border-red-400 p-4">
-          <p className="text-sm text-red-600">{processingError}</p>
+          <p className="text-sm font-medium text-red-600">
+            Document processing could not be completed. Please retry later.
+          </p>
           <button
             type="button"
             onClick={handleRetry}
             disabled={isPending}
             className="mt-2 rounded-md border px-3 py-1 text-sm hover:bg-foreground/10 disabled:opacity-50"
           >
-            Retry processing
+            {isPending ? 'Retrying…' : 'Retry processing'}
           </button>
+          {process.env.NODE_ENV !== 'production' && (
+            <details className="mt-2 text-xs text-foreground/60">
+              <summary className="cursor-pointer">Technical details</summary>
+              <pre className="mt-1 whitespace-pre-wrap break-all">{processingError}</pre>
+            </details>
+          )}
         </div>
       )}
 

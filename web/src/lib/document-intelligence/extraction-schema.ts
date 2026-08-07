@@ -3,35 +3,38 @@ import type { DocumentExtraction } from '@/lib/types'
 
 const confidenceSchema = z.enum(['high', 'medium', 'low'])
 
+// Every nested object in the OpenAI strict schema must list all of its properties
+// in its `required` array. Fields that are logically optional are represented as
+// required-but-nullable so the model always returns the key.
 const extractedStringSchema = z.object({
   value: z.string().nullable(),
   confidence: confidenceSchema,
-  evidence: z.string().nullable().optional(),
+  evidence: z.string().nullable(),
 })
 
 const extractedNumberSchema = z.object({
   value: z.number().nullable(),
   confidence: confidenceSchema,
-  evidence: z.string().nullable().optional(),
+  evidence: z.string().nullable(),
 })
 
 const extractedDirectionSchema = z.object({
   value: z.enum(['payable', 'receivable']).nullable(),
   confidence: confidenceSchema,
-  evidence: z.string().nullable().optional(),
+  evidence: z.string().nullable(),
 })
 
 const proposedActionSchema = z.object({
   type: z.enum(['obligation', 'task', 'none']),
-  direction: z.enum(['payable', 'receivable']).nullable().optional(),
-  category: z.string().nullable().optional(),
-  description: z.string().nullable().optional(),
-  expected_amount: z.number().nullable().optional(),
-  due_date: z.string().nullable().optional(),
-  action_due_date: z.string().nullable().optional(),
-  period_start: z.string().nullable().optional(),
-  period_end: z.string().nullable().optional(),
-  title: z.string().nullable().optional(),
+  direction: z.enum(['payable', 'receivable']).nullable(),
+  category: z.string().nullable(),
+  description: z.string().nullable(),
+  expected_amount: z.number().nullable(),
+  due_date: z.string().nullable(),
+  action_due_date: z.string().nullable(),
+  period_start: z.string().nullable(),
+  period_end: z.string().nullable(),
+  title: z.string().nullable(),
 })
 
 export const documentExtractionSchema = z.object({
@@ -112,18 +115,46 @@ export function parseExtractionOrEmpty(raw: unknown): DocumentExtraction {
   return parseExtraction(raw) ?? emptyExtraction()
 }
 
-function extractedJsonSchema(type: 'string' | 'number' | 'string | null' = 'string') {
-  const base = {
+function extractedJsonSchema(type: 'string' | 'number' = 'string') {
+  return {
     type: 'object',
     properties: {
       value: type === 'number' ? { type: ['number', 'null'] } : { type: ['string', 'null'] },
       confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
       evidence: { type: ['string', 'null'] },
     },
-    required: ['value', 'confidence'],
+    required: ['value', 'confidence', 'evidence'],
     additionalProperties: false,
   }
-  return base
+}
+
+const directionJsonSchema = {
+  type: 'object',
+  properties: {
+    value: { type: ['string', 'null'], enum: ['payable', 'receivable', null] },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    evidence: { type: ['string', 'null'] },
+  },
+  required: ['value', 'confidence', 'evidence'],
+  additionalProperties: false,
+}
+
+const proposedActionJsonSchema = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', enum: ['obligation', 'task', 'none'] },
+    direction: { type: ['string', 'null'], enum: ['payable', 'receivable', null] },
+    category: { type: ['string', 'null'] },
+    description: { type: ['string', 'null'] },
+    expected_amount: { type: ['number', 'null'] },
+    due_date: { type: ['string', 'null'] },
+    action_due_date: { type: ['string', 'null'] },
+    period_start: { type: ['string', 'null'] },
+    period_end: { type: ['string', 'null'] },
+    title: { type: ['string', 'null'] },
+  },
+  required: ['type', 'direction', 'category', 'description', 'expected_amount', 'due_date', 'action_due_date', 'period_start', 'period_end', 'title'],
+  additionalProperties: false,
 }
 
 export const documentExtractionJsonSchema = {
@@ -153,39 +184,14 @@ export const documentExtractionJsonSchema = {
       total_amount: extractedJsonSchema('number'),
       previous_balance: extractedJsonSchema('number'),
       payment_received: extractedJsonSchema('number'),
-      direction: {
-        type: 'object',
-        properties: {
-          value: { type: ['string', 'null'], enum: ['payable', 'receivable', null] },
-          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-          evidence: { type: ['string', 'null'] },
-        },
-        required: ['value', 'confidence'],
-        additionalProperties: false,
-      },
+      direction: directionJsonSchema,
       likely_category: extractedJsonSchema(),
       required_action: extractedJsonSchema(),
       action_due_date: extractedJsonSchema(),
       notes: extractedJsonSchema(),
       proposed_actions: {
         type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            type: { type: 'string', enum: ['obligation', 'task', 'none'] },
-            direction: { type: ['string', 'null'], enum: ['payable', 'receivable', null] },
-            category: { type: ['string', 'null'] },
-            description: { type: ['string', 'null'] },
-            expected_amount: { type: ['number', 'null'] },
-            due_date: { type: ['string', 'null'] },
-            action_due_date: { type: ['string', 'null'] },
-            period_start: { type: ['string', 'null'] },
-            period_end: { type: ['string', 'null'] },
-            title: { type: ['string', 'null'] },
-          },
-          required: ['type'],
-          additionalProperties: false,
-        },
+        items: proposedActionJsonSchema,
       },
     },
     required: [

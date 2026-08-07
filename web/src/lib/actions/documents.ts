@@ -264,13 +264,13 @@ export async function processDocument(documentId: string): Promise<ActionResult>
     .eq('user_id', user.id)
 
   if (processingUpdateError) {
-    return { error: `Could not set processing state: ${processingUpdateError.message}` }
+    return { error: 'Document processing could not be completed. Please retry later.' }
   }
 
   const { data: fileData, error: downloadError } = await supabase.storage.from('documents').download(document.storage_path)
   if (downloadError) {
     await markFailed(documentId, supabase, user.id, `Could not retrieve file: ${downloadError.message}`)
-    return { error: 'Could not retrieve uploaded file for processing' }
+    return { error: 'Document processing could not be completed. Please retry later.' }
   }
 
   const buffer = Buffer.from(await fileData.arrayBuffer())
@@ -300,7 +300,7 @@ export async function processDocument(documentId: string): Promise<ActionResult>
 
   if (runError) {
     await markFailed(documentId, supabase, user.id, `Could not record processing run: ${runError.message}`)
-    return { error: 'Could not record processing run' }
+    return { error: 'Document processing could not be completed. Please retry later.' }
   }
 
   try {
@@ -329,7 +329,7 @@ export async function processDocument(documentId: string): Promise<ActionResult>
 
     if (runUpdateError) {
       await markFailed(documentId, supabase, user.id, `Could not update processing run: ${runUpdateError.message}`, run.id)
-      return { error: 'Could not update processing run' }
+      return { error: 'Document processing could not be completed. Please retry later.' }
     }
 
     // Proposed matches are not persisted as confirmed relationships before review.
@@ -358,12 +358,13 @@ export async function processDocument(documentId: string): Promise<ActionResult>
 
     if (documentUpdateError) {
       await markFailed(documentId, supabase, user.id, `Could not save extraction: ${documentUpdateError.message}`, run.id)
-      return { error: 'Could not save extraction' }
+      return { error: 'Document processing could not be completed. Please retry later.' }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown processing error'
     await markFailed(documentId, supabase, user.id, message, run?.id)
-    return { error: message }
+    // Keep the technical OpenAI/config error server-side; expose a user-facing retry message.
+    return { error: 'Document processing could not be completed. Please retry later.' }
   }
 
   revalidatePath('/documents')
@@ -420,6 +421,7 @@ export async function confirmDocument(documentId: string, formData: FormData): P
 
   const amountRaw = fieldValue(formData, 'amount')
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('confirm_document', {
     p_user_id: user.id,
     p_document_id: documentId,

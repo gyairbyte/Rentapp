@@ -207,20 +207,20 @@ export type Confidence = 'high' | 'medium' | 'low'
 export type ExtractedField<T = string | number | null> = {
   value: T
   confidence: Confidence
-  evidence?: string | null
+  evidence: string | null
 }
 
 export type ProposedAction = {
   type: 'obligation' | 'task' | 'none'
-  direction?: 'payable' | 'receivable' | null
-  category?: string | null
-  description?: string | null
-  expected_amount?: number | null
-  due_date?: string | null
-  action_due_date?: string | null
-  period_start?: string | null
-  period_end?: string | null
-  title?: string | null
+  direction: 'payable' | 'receivable' | null
+  category: string | null
+  description: string | null
+  expected_amount: number | null
+  due_date: string | null
+  action_due_date: string | null
+  period_start: string | null
+  period_end: string | null
+  title: string | null
 }
 
 export type DocumentExtraction = {
