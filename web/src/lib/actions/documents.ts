@@ -9,6 +9,7 @@ import { formatZodErrors } from '@/lib/utils'
 import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, parseExtraction, hashFileBuffer } from '@/lib/document-intelligence'
 import { findDocumentMatch } from '@/lib/document-intelligence/matching'
 import { detectSemanticDuplicates } from '@/lib/document-intelligence/duplicates'
+import { getSelectablePaymentOptions, isSelectablePaymentOption } from '@/lib/payment-options'
 import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert } from '@/lib/types'
 
 type ActionResult =
@@ -463,9 +464,9 @@ export async function confirmDocument(documentId: string, formData: FormData): P
   let selectedDueDate: string | null = null
   let selectedPaymentOptionIndex: number | null = null
 
-  const SELECTABLE_OPTION_TYPES = ['full', 'discounted', 'installment_plan']
+  const selectablePaymentOptions = getSelectablePaymentOptions(paymentOptions)
 
-  if (paymentOptions.length > 0) {
+  if (selectablePaymentOptions.length > 0) {
     if (!selectedPaymentOptionIndexRaw) {
       return { error: 'A payment option must be selected' }
     }
@@ -474,7 +475,7 @@ export async function confirmDocument(documentId: string, formData: FormData): P
       return { error: 'Invalid payment option selection' }
     }
     const selected = paymentOptions[index]
-    if (!selected || !SELECTABLE_OPTION_TYPES.includes(selected.option_type)) {
+    if (!selected || !isSelectablePaymentOption(selected)) {
       return { error: 'Selected payment option is not a valid selectable plan' }
     }
     selectedPaymentOptionIndex = index

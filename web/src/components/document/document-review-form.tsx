@@ -85,13 +85,13 @@ export function DocumentReviewForm({
   const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(
     getInitialSelectedPaymentOptionIndex(selectableOptions)
   )
-  const selectedOption = selectedOriginalIndex !== null ? paymentOptions[selectedOriginalIndex] ?? null : null
 
-  // If the set of selectable options changes (e.g. extraction reloaded), reset the selection safely.
-  const firstSelectableIndex = selectableOptions[0]?.originalIndex
-  if (firstSelectableIndex !== undefined && !isSelectablePaymentOption(selectedOption)) {
-    setSelectedOriginalIndex(getInitialSelectedPaymentOptionIndex(selectableOptions))
-  }
+  // Derive a safe, valid selection without mutating state during render.
+  const effectiveSelectedOriginalIndex =
+    selectedOriginalIndex !== null && isSelectablePaymentOption(paymentOptions[selectedOriginalIndex])
+      ? selectedOriginalIndex
+      : getInitialSelectedPaymentOptionIndex(selectableOptions)
+  const selectedOption = effectiveSelectedOriginalIndex !== null ? paymentOptions[effectiveSelectedOriginalIndex] ?? null : null
 
   // High-confidence deterministic matches may be prefilled, but remain visibly reviewable.
   const suggestedPropertyId = document.property_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.property_id : null)
@@ -105,7 +105,7 @@ export function DocumentReviewForm({
 
   const derivedAmount = selectedOption?.amount ?? proposedObligation?.expected_amount ?? extraction.amount_due.value ?? ''
   const derivedDueDate = selectedOption?.due_date ?? proposedObligation?.due_date ?? extraction.due_date.value ?? ''
-  const canConfirmPayment = !hasPaymentOptions || selectedOriginalIndex !== null
+  const canConfirmPayment = !hasPaymentOptions || effectiveSelectedOriginalIndex !== null
 
   async function handleConfirm(formData: FormData) {
     setIsPending(true)
@@ -266,14 +266,14 @@ export function DocumentReviewForm({
           <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
             This document contains multiple payment options and deadlines. Select the plan you intend to follow.
           </div>
-          <input type="hidden" name="selected_payment_option_index" value={selectedOriginalIndex ?? ''} />
+          <input type="hidden" name="selected_payment_option_index" value={effectiveSelectedOriginalIndex ?? ''} />
           <fieldset className="space-y-3">
             <legend className="font-semibold">Payment options</legend>
             {selectableOptions.map(({ option, originalIndex }) => (
               <label
                 key={originalIndex}
                 className={`block rounded-lg border p-3 cursor-pointer transition-colors ${
-                  selectedOriginalIndex === originalIndex ? 'border-foreground bg-foreground/5' : 'hover:bg-foreground/5'
+                  effectiveSelectedOriginalIndex === originalIndex ? 'border-foreground bg-foreground/5' : 'hover:bg-foreground/5'
                 }`}
               >
                 <div className="flex items-start gap-3">
@@ -281,7 +281,7 @@ export function DocumentReviewForm({
                     type="radio"
                     name="payment_option"
                     value={originalIndex}
-                    checked={selectedOriginalIndex === originalIndex}
+                    checked={effectiveSelectedOriginalIndex === originalIndex}
                     onChange={() => setSelectedOriginalIndex(originalIndex)}
                     className="mt-1"
                   />
@@ -430,7 +430,7 @@ export function DocumentReviewForm({
         </section>
       )}
 
-      {hasPaymentOptions && selectedOriginalIndex === null && (
+      {hasPaymentOptions && effectiveSelectedOriginalIndex === null && (
         <p className="text-sm text-amber-700">Select a payment option before confirming.</p>
       )}
 

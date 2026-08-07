@@ -58,6 +58,20 @@ const taxPaymentOptions: PaymentOption[] = [
   },
 ]
 
+function paymentOption(overrides: Partial<PaymentOption> & { option_type: PaymentOption['option_type'] }): PaymentOption {
+  return {
+    option_type: overrides.option_type,
+    amount: overrides.amount ?? null,
+    due_date: overrides.due_date ?? null,
+    description: overrides.description ?? null,
+    discount_amount: overrides.discount_amount ?? null,
+    penalty_amount: overrides.penalty_amount ?? null,
+    penalty_date: overrides.penalty_date ?? null,
+    late_payment_terms: overrides.late_payment_terms ?? [],
+    installments: overrides.installments ?? [],
+  }
+}
+
 function extracted<T>(value: T) {
   return { value, confidence: 'high' as const, evidence: null }
 }
@@ -309,5 +323,83 @@ describe('confirmDocument', () => {
     const args = client.rpc.mock.calls[0][1]
     expect(args.p_payment_options).toEqual(taxPaymentOptions)
     expect(args.p_amount).toBe(taxPaymentOptions[0].amount)
+  })
+
+  it('uses the manual/top-level path when only nonselectable payment options exist', async () => {
+    const extraction = makeExtraction({
+      likely_category: extracted('school_tax'),
+      proposed_actions: [
+        obligationAction([
+          paymentOption({ option_type: 'penalty', amount: 1932.16, due_date: '2026-10-31', description: 'Penalty after 10/31' }),
+        ]),
+      ],
+    })
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await confirmDocument('d-1', makeForm())
+
+    expect(result).toEqual({ success: true })
+    const args = client.rpc.mock.calls[0][1]
+    expect(args.p_selected_payment_option_index).toBeNull()
+    expect(args.p_amount).toBe(134.6)
+    expect(args.p_due_date).toBe('2026-08-25')
+  })
+
+  it('requires a payment option selection when multiple selectable plans exist', async () => {
+    const client = makeSupabaseClient({ extraction: makeTaxExtraction() })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const form = makeForm()
+    const result = await confirmDocument('d-1', form)
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('A payment option must be selected')
+    expect(client.rpc).not.toHaveBeenCalled()
+  })
+
+  it('rejects a submitted nonselectable payment option index', async () => {
+    const extraction = makeExtraction({
+      likely_category: extracted('school_tax'),
+      proposed_actions: [
+        obligationAction([
+          paymentOption({ option_type: 'penalty', amount: 1932.16, due_date: '2026-10-31', description: 'Penalty' }),
+          ...taxPaymentOptions,
+        ]),
+      ],
+    })
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const form = makeForm({ selected_payment_option_index: '0' })
+    const result = await confirmDocument('d-1', form)
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('not a valid selectable plan')
+    expect(client.rpc).not.toHaveBeenCalled()
+  })
+
+  it('preserves the original index when an earlier option is filtered out as nonselectable', async () => {
+    const extraction = makeExtraction({
+      likely_category: extracted('school_tax'),
+      proposed_actions: [
+        obligationAction([
+          paymentOption({ option_type: 'penalty', amount: 1932.16, due_date: '2026-10-31', description: 'Penalty' }),
+          ...taxPaymentOptions,
+        ]),
+      ],
+    })
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const form = makeForm({ selected_payment_option_index: '2' })
+    const result = await confirmDocument('d-1', form)
+
+    expect(result).toEqual({ success: true })
+    const args = client.rpc.mock.calls[0][1]
+    expect(args.p_selected_payment_option_index).toBe(2)
+    expect(args.p_payment_options[2].option_type).toBe('full')
+    expect(args.p_amount).toBe(1756.51)
+    expect(args.p_due_date).toBe('2026-10-31')
   })
 })
