@@ -15,8 +15,9 @@ vi.mock('next/cache', () => ({
 
 import { requireUser } from '@/lib/actions/helpers'
 import { createClient } from '@/lib/supabase/client'
+import type { DocumentExtraction, PaymentOption } from '@/lib/types'
 
-const taxPaymentOptions = [
+const taxPaymentOptions: PaymentOption[] = [
   {
     option_type: 'discounted',
     amount: 1703.81,
@@ -54,13 +55,130 @@ const taxPaymentOptions = [
   },
 ]
 
+function extracted<T>(value: T) {
+  return { value, confidence: 'high' as const, evidence: null }
+}
+
+function obligationAction(paymentOptions: typeof taxPaymentOptions): DocumentExtraction['proposed_actions'][number] {
+  return {
+    type: 'obligation' as const,
+    direction: 'payable' as const,
+    category: 'school_tax',
+    description: 'School tax bill',
+    expected_amount: 1756.51,
+    due_date: '2026-10-31',
+    action_due_date: null,
+    period_start: null,
+    period_end: null,
+    title: null,
+    payment_options: paymentOptions,
+  }
+}
+
+function makeExtraction(overrides: Partial<DocumentExtraction> = {}): DocumentExtraction {
+  return {
+    document_type: null,
+    document_class: 'financial',
+    requires: 'money',
+    issuer: extracted(null),
+    account_number: extracted(null),
+    account_number_suffix: extracted(null),
+    invoice_number: extracted(null),
+    parcel_number: extracted(null),
+    policy_number: extracted(null),
+    service_address: extracted(null),
+    mailing_address: extracted(null),
+    tenant_name: extracted(null),
+    property_identifiers: extracted(null),
+    document_date: extracted(null),
+    due_date: extracted('2026-08-31'),
+    service_period_start: extracted(null),
+    service_period_end: extracted(null),
+    amount_due: extracted(1756.51),
+    total_amount: extracted(null),
+    previous_balance: extracted(null),
+    payment_received: extracted(null),
+    direction: extracted('payable'),
+    likely_category: extracted('water'),
+    required_action: extracted(null),
+    action_due_date: extracted(null),
+    notes: extracted(null),
+    proposed_actions: [obligationAction([])],
+    ...overrides,
+  }
+}
+
+function makeTaxExtraction(): DocumentExtraction {
+  return makeExtraction({
+    likely_category: extracted('school_tax'),
+    proposed_actions: [obligationAction(taxPaymentOptions)],
+  })
+}
+
+function makeSupabaseClient({
+  extraction,
+  rpcReturn,
+}: {
+  extraction?: DocumentExtraction
+  rpcReturn?: { data?: unknown; error?: { message: string } | null }
+}) {
+  const documentRow = {
+    id: 'd-1',
+    user_id: 'u-1',
+    raw_ai_extraction: null,
+    storage_path: 'u-1/test.pdf',
+    original_filename: 'test.pdf',
+    file_hash: 'hash',
+    file_size: 1000,
+    mime_type: 'application/pdf',
+    processing_status: 'processed',
+    review_status: 'unreviewed',
+  }
+
+  const runRows = extraction ? [{ normalized_extraction: extraction }] : []
+
+  function mockFrom(table: string) {
+    let single = false
+    const builder = {
+      select: vi.fn(() => builder),
+      eq: vi.fn(() => builder),
+      order: vi.fn(() => builder),
+      limit: vi.fn(() => builder),
+      single: vi.fn(() => {
+        single = true
+        return builder
+      }),
+      returns: vi.fn(() => {
+        if (table === 'documents') {
+          return Promise.resolve(single ? { data: documentRow, error: null } : { data: [documentRow], error: null })
+        }
+        if (table === 'document_processing_runs') {
+          return Promise.resolve({ data: runRows, error: null })
+        }
+        return Promise.resolve({ data: null, error: null })
+      }),
+    }
+    return builder
+  }
+
+  return {
+    rpc: vi.fn().mockResolvedValue(
+      rpcReturn ?? {
+        data: { obligation_ids: ['o-1'], task_id: null },
+        error: null,
+      },
+    ),
+    from: vi.fn(mockFrom),
+  }
+}
+
 function makeForm(overrides: Record<string, string> = {}): FormData {
   const form = new FormData()
   const entries: Record<string, string> = {
     property_id: 'p-1',
     account_id: 'a-1',
     party_id: 'pt-1',
-    document_type: 'water',
+    document_type: 'school_tax',
     issuer: 'City Water',
     document_date: '2026-08-01',
     due_date: '2026-08-25',
@@ -84,34 +202,38 @@ describe('confirmDocument', () => {
 
   it('returns an error if property_id is missing', async () => {
     const form = makeForm({ property_id: '' })
+    const client = makeSupabaseClient({ extraction: makeTaxExtraction() })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
     const result = await confirmDocument('d-1', form)
+
     expect('error' in result).toBe(true)
     expect((result as { error: string }).error).toContain('property is required')
   })
 
   it('returns an error when the RPC fails', async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'Obligation insert failed' } })
-    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ rpc })
+    const client = makeSupabaseClient({
+      extraction: makeExtraction(),
+      rpcReturn: { data: null, error: { message: 'Obligation insert failed' } },
+    })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
     const result = await confirmDocument('d-1', makeForm())
 
     expect('error' in result).toBe(true)
     expect((result as { error: string }).error).toBe('Obligation insert failed')
-    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(client.rpc).toHaveBeenCalledTimes(1)
   })
 
   it('returns success when the RPC confirms the document', async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: { obligation_id: 'o-1', task_id: 't-1' },
-      error: null,
-    })
-    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ rpc })
+    const client = makeSupabaseClient({ extraction: makeExtraction() })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
     const result = await confirmDocument('d-1', makeForm())
 
     expect(result).toEqual({ success: true })
-    expect(rpc).toHaveBeenCalledTimes(1)
-    const call = rpc.mock.calls[0]
+    expect(client.rpc).toHaveBeenCalledTimes(1)
+    const call = client.rpc.mock.calls[0]
     expect(call[0]).toBe('confirm_document')
     expect(call[1].p_user_id).toBe('u-1')
     expect(call[1].p_document_id).toBe('d-1')
@@ -119,67 +241,70 @@ describe('confirmDocument', () => {
     expect(call[1].p_amount).toBe(134.6)
   })
 
-  it('is idempotent from the client perspective on a repeated RPC call', async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: { obligation_id: 'o-1', task_id: 't-1' },
-      error: null,
-    })
-    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ rpc })
+  it('rejects an out-of-range payment option selection', async () => {
+    const client = makeSupabaseClient({ extraction: makeTaxExtraction() })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const form = makeForm()
-    const first = await confirmDocument('d-1', form)
-    const second = await confirmDocument('d-1', form)
+    const form = makeForm({ selected_payment_option_index: '99' })
+    const result = await confirmDocument('d-1', form)
 
-    expect(first).toEqual({ success: true })
-    expect(second).toEqual({ success: true })
-    expect(rpc).toHaveBeenCalledTimes(2)
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('Invalid payment option selection')
+    expect(client.rpc).not.toHaveBeenCalled()
   })
 
-  it('passes the installment payment option to the confirmation RPC', async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: { obligation_id: 'o-1', obligation_ids: ['o-1', 'o-2', 'o-3', 'o-4'], task_id: null },
-      error: null,
-    })
-    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ rpc })
+  it('passes the installment payment option to the confirmation RPC from server-side extraction', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const form = makeForm({
-      document_type: 'school_tax',
-      category: 'school_tax',
-      description: 'School tax',
-      payment_options: JSON.stringify(taxPaymentOptions),
-      selected_payment_option_index: '2',
-    })
+    const form = makeForm({ selected_payment_option_index: '2' })
     const result = await confirmDocument('d-1', form)
 
     expect(result).toEqual({ success: true })
-    expect(rpc).toHaveBeenCalledTimes(1)
-    const args = rpc.mock.calls[0][1]
+    expect(client.rpc).toHaveBeenCalledTimes(1)
+    const args = client.rpc.mock.calls[0][1]
     expect(args.p_selected_payment_option_index).toBe(2)
     expect(args.p_payment_options).toEqual(taxPaymentOptions)
     expect(args.p_amount).toBe(1756.51)
+    expect(args.p_due_date).toBe('2026-10-31')
   })
 
-  it('passes the full-payment option to the confirmation RPC', async () => {
-    const rpc = vi.fn().mockResolvedValue({
-      data: { obligation_id: 'o-1', obligation_ids: ['o-1'], task_id: null },
-      error: null,
-    })
-    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ rpc })
+  it('passes the full-payment option to the confirmation RPC from server-side extraction', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const form = makeForm({
-      document_type: 'school_tax',
-      category: 'school_tax',
-      description: 'School tax',
-      payment_options: JSON.stringify(taxPaymentOptions),
-      selected_payment_option_index: '1',
-    })
+    const form = makeForm({ selected_payment_option_index: '1' })
     const result = await confirmDocument('d-1', form)
 
     expect(result).toEqual({ success: true })
-    const args = rpc.mock.calls[0][1]
+    const args = client.rpc.mock.calls[0][1]
     expect(args.p_selected_payment_option_index).toBe(1)
     expect(args.p_payment_options[1].option_type).toBe('full')
     expect(args.p_payment_options[1].amount).toBe(1756.51)
     expect(args.p_payment_options[1].due_date).toBe('2026-10-31')
+  })
+
+  it('ignores tampered browser payment-options JSON and uses server-side extraction', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const tampered = JSON.stringify([
+      { option_type: 'full', amount: 1, due_date: '2026-01-01', description: 'Hacked', installments: [] },
+    ])
+    const form = makeForm({
+      selected_payment_option_index: '0',
+      payment_options: tampered,
+      amount: '1',
+      due_date: '2026-01-01',
+    })
+    const result = await confirmDocument('d-1', form)
+
+    expect(result).toEqual({ success: true })
+    const args = client.rpc.mock.calls[0][1]
+    expect(args.p_payment_options).toEqual(taxPaymentOptions)
+    expect(args.p_amount).toBe(taxPaymentOptions[0].amount)
   })
 })

@@ -179,7 +179,6 @@ export function DocumentReviewForm({
           <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
             This document contains multiple payment options and deadlines. Select the plan you intend to follow.
           </div>
-          <input type="hidden" name="payment_options" value={JSON.stringify(paymentOptions)} />
           <input type="hidden" name="selected_payment_option_index" value={selectedOptionIndex} />
           <fieldset className="space-y-3">
             <legend className="font-semibold">Payment options</legend>

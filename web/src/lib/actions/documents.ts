@@ -6,10 +6,10 @@ import { createClient } from '@/lib/supabase/client'
 import { documentSchema } from '@/lib/validations/document'
 import { requireUser } from './helpers'
 import { formatZodErrors } from '@/lib/utils'
-import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, hashFileBuffer } from '@/lib/document-intelligence'
+import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, parseExtraction, hashFileBuffer } from '@/lib/document-intelligence'
 import { findDocumentMatch } from '@/lib/document-intelligence/matching'
 import { detectSemanticDuplicates } from '@/lib/document-intelligence/duplicates'
-import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert, PaymentOption } from '@/lib/types'
+import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert } from '@/lib/types'
 
 type ActionResult =
   | { success: true; id?: string; duplicateDocumentId?: string }
@@ -123,6 +123,36 @@ export async function getDocumentWithDetails(id: string) {
     parties: partiesResult.data ?? [],
     duplicates: duplicateCandidates,
   }
+}
+
+async function getDocumentExtraction(documentId: string): Promise<{ document: Document; extraction: DocumentExtraction } | null> {
+  const user = await requireUser()
+  const supabase = await createClient()
+
+  const { data: document, error: docError } = await supabase
+    .from('documents')
+    .select('*')
+    .eq('id', documentId)
+    .eq('user_id', user.id)
+    .single()
+    .returns<Document>()
+
+  if (docError || !document) return null
+
+  const { data: runs } = await supabase
+    .from('document_processing_runs')
+    .select('normalized_extraction')
+    .eq('document_id', documentId)
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .returns<Array<Pick<DocumentProcessingRun, 'normalized_extraction'>>>()
+
+  const rawExtraction = runs?.[0]?.normalized_extraction ?? tryParseRaw(document.raw_ai_extraction)
+  const extraction = parseExtraction(rawExtraction)
+  if (!extraction) return null
+
+  return { document, extraction }
 }
 
 async function findDuplicateCandidates(
@@ -416,42 +446,39 @@ export async function confirmDocument(documentId: string, formData: FormData): P
   const user = await requireUser()
   const supabase = await createClient()
 
+  const loaded = await getDocumentExtraction(documentId)
+  if (!loaded) return { error: 'Document not found or extraction is invalid' }
+  const { extraction } = loaded
+
   const propertyId = fieldValue(formData, 'property_id')
   if (!propertyId) return { error: 'A property is required to confirm' }
 
-  const amountRaw = fieldValue(formData, 'amount')
-  let selectedAmount = amountRaw ? Number(amountRaw) : null
-  let selectedDueDate = fieldValue(formData, 'due_date')
+  // Payment plans come from the server-side extraction, not the browser. The client only
+  // submits the selected option index, and we validate it against the canonical extraction.
+  const obligationAction = extraction.proposed_actions.find((a) => a.type === 'obligation')
+  const paymentOptions = obligationAction?.payment_options ?? []
 
-  const paymentOptionsRaw = fieldValue(formData, 'payment_options')
   const selectedPaymentOptionIndexRaw = fieldValue(formData, 'selected_payment_option_index')
-  let paymentOptions: PaymentOption[] | null = null
+  let selectedAmount: number | null = null
+  let selectedDueDate: string | null = null
   let selectedPaymentOptionIndex: number | null = null
 
-  if (paymentOptionsRaw && selectedPaymentOptionIndexRaw) {
-    try {
-      const parsed = JSON.parse(paymentOptionsRaw)
-      if (Array.isArray(parsed)) {
-        paymentOptions = parsed as PaymentOption[]
-        selectedPaymentOptionIndex = Number(selectedPaymentOptionIndexRaw)
-        if (
-          Number.isNaN(selectedPaymentOptionIndex) ||
-          selectedPaymentOptionIndex < 0 ||
-          selectedPaymentOptionIndex >= paymentOptions.length
-        ) {
-          return { error: 'Invalid payment option selection' }
-        }
-        const selected = paymentOptions[selectedPaymentOptionIndex]
-        if (selected.amount !== null && selected.amount !== undefined) {
-          selectedAmount = selected.amount
-        }
-        if (selected.due_date !== null && selected.due_date !== undefined) {
-          selectedDueDate = selected.due_date
-        }
-      }
-    } catch {
-      return { error: 'Invalid payment options' }
+  if (paymentOptions.length > 0) {
+    if (!selectedPaymentOptionIndexRaw) {
+      return { error: 'A payment option must be selected' }
     }
+    const index = Number(selectedPaymentOptionIndexRaw)
+    if (Number.isNaN(index) || index < 0 || index >= paymentOptions.length) {
+      return { error: 'Invalid payment option selection' }
+    }
+    selectedPaymentOptionIndex = index
+    const selected = paymentOptions[index]
+    selectedAmount = selected.amount ?? null
+    selectedDueDate = selected.due_date ?? null
+  } else {
+    const amountRaw = fieldValue(formData, 'amount')
+    selectedAmount = amountRaw ? Number(amountRaw) : null
+    selectedDueDate = fieldValue(formData, 'due_date')
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -482,7 +509,7 @@ export async function confirmDocument(documentId: string, formData: FormData): P
     return { error: error.message }
   }
 
-  const result = data as { obligation_id?: string | null; task_id?: string | null } | null
+  const result = data as { obligation_ids?: string[] | null; task_id?: string | null } | null
   if (!result) {
     return { error: 'Confirmation did not return a result' }
   }

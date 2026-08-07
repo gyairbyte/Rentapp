@@ -9,6 +9,8 @@ create unique index if not exists obligations_source_document_id_due_date_unique
   on public.obligations (source_document_id, due_date);
 
 -- Atomic confirmation with optional payment-plan selection.
+-- Drop the previous single-obligation signature so the new overload replaces it cleanly.
+drop function if exists public.confirm_document cascade;
 create or replace function public.confirm_document(
   p_user_id uuid,
   p_document_id uuid,

@@ -81,6 +81,7 @@ export type Obligation = {
   party_id: string | null
   recurring_rule_id: string | null
   source_document_id: string | null
+  source_item_key: string | null
   direction: string
   category: string
   description: string | null
@@ -96,8 +97,8 @@ export type Obligation = {
   updated_at: string
 }
 
-export type ObligationInsert = Omit<Obligation, 'id' | 'created_at' | 'updated_at' | 'account_id' | 'party_id' | 'recurring_rule_id' | 'source_document_id' | 'description' | 'paid_date' | 'period_start' | 'period_end' | 'notes'>
-  & Partial<Pick<Obligation, 'account_id' | 'party_id' | 'recurring_rule_id' | 'source_document_id' | 'description' | 'paid_date' | 'period_start' | 'period_end' | 'notes'>>
+export type ObligationInsert = Omit<Obligation, 'id' | 'created_at' | 'updated_at' | 'account_id' | 'party_id' | 'recurring_rule_id' | 'source_document_id' | 'source_item_key' | 'description' | 'paid_date' | 'period_start' | 'period_end' | 'notes'>
+  & Partial<Pick<Obligation, 'account_id' | 'party_id' | 'recurring_rule_id' | 'source_document_id' | 'source_item_key' | 'description' | 'paid_date' | 'period_start' | 'period_end' | 'notes'>>
 export type ObligationUpdate = Partial<Omit<Obligation, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
 
 export type Payment = {
