@@ -3,8 +3,14 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { confirmDocument, retryProcessDocument, archiveDocument } from '@/lib/actions/documents'
+import { formatDateOnly } from '@/lib/actions/dates'
 import { Field, SelectField } from '@/components/ui/form'
 import { DOCUMENT_TYPES, DIRECTIONS, OBLIGATION_CATEGORIES } from '@/lib/constants'
+import {
+  isSelectablePaymentOption,
+  getSelectablePaymentOptions,
+  getInitialSelectedPaymentOptionIndex,
+} from '@/lib/payment-options'
 import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
 
@@ -13,25 +19,10 @@ function formatCurrency(amount: number | null) {
   return `$${Number(amount).toFixed(2)}`
 }
 
-function formatDate(date: string | null) {
-  if (!date) return ''
-  try {
-    return new Date(date).toLocaleDateString()
-  } catch {
-    return date
-  }
-}
-
-const SELECTABLE_OPTION_TYPES = ['full', 'discounted', 'installment_plan']
-
-function isSelectable(option: PaymentOption | null | undefined) {
-  return !!option && SELECTABLE_OPTION_TYPES.includes(option.option_type)
-}
-
 function formatOptionSummary(option: PaymentOption) {
   const parts: string[] = []
   if (option.amount !== null) parts.push(formatCurrency(option.amount))
-  if (option.due_date) parts.push(`due ${formatDate(option.due_date)}`)
+  if (option.due_date) parts.push(`due ${formatDateOnly(option.due_date)}`)
   if (option.discount_amount !== null && option.discount_amount > 0) parts.push(`discount ${formatCurrency(option.discount_amount)}`)
   if (parts.length > 0) return parts.join(' · ')
   return option.description ?? option.option_type.replace(/_/g, ' ')
@@ -42,8 +33,8 @@ function formatTerm(term: PaymentTerm) {
   if (term.term_type) parts.push(term.term_type.replace(/_/g, ' '))
   if (term.rate !== null && term.rate > 0) parts.push(`${(term.rate * 100).toFixed(0)}%`)
   if (term.amount !== null) parts.push(formatCurrency(term.amount))
-  if (term.effective_date) parts.push(`effective ${formatDate(term.effective_date)}`)
-  if (term.due_date) parts.push(`due ${formatDate(term.due_date)}`)
+  if (term.effective_date) parts.push(`effective ${formatDateOnly(term.effective_date)}`)
+  if (term.due_date) parts.push(`due ${formatDateOnly(term.due_date)}`)
   if (term.description) parts.push(term.description)
   return parts.filter(Boolean).join(' · ')
 }
@@ -58,7 +49,7 @@ function allLatePaymentTerms(option: PaymentOption | undefined): PaymentTerm[] {
       rate: null,
       effective_date: option.penalty_date,
       due_date: option.penalty_date,
-      description: `Penalty if not paid by ${formatDate(option.penalty_date)}`,
+      description: `Penalty if not paid by ${formatDateOnly(option.penalty_date)}`,
     })
   }
   return terms
@@ -88,16 +79,18 @@ export function DocumentReviewForm({
   const proposedObligation = extraction.proposed_actions.find((a) => a.type === 'obligation')
   const proposedTask = extraction.proposed_actions.find((a) => a.type === 'task')
   const paymentOptions = proposedObligation?.payment_options ?? []
-  const selectableOptions = paymentOptions.map((option, idx) => ({ option, idx })).filter(({ option }) => isSelectable(option))
+  const selectableOptions = getSelectablePaymentOptions(paymentOptions)
   const hasPaymentOptions = selectableOptions.length > 0
-  const nonSelectableOptions = paymentOptions.filter((option) => !isSelectable(option))
-  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState(selectableOptions[0]?.idx ?? 0)
-  const selectedOption = paymentOptions[selectedOriginalIndex] ?? null
+  const nonSelectableOptions = paymentOptions.filter((option) => !isSelectablePaymentOption(option))
+  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(
+    getInitialSelectedPaymentOptionIndex(selectableOptions)
+  )
+  const selectedOption = selectedOriginalIndex !== null ? paymentOptions[selectedOriginalIndex] ?? null : null
 
-  // If the set of selectable options changes (e.g. extraction reloaded), reset to the first selectable option.
-  const firstSelectableIndex = selectableOptions[0]?.idx
-  if (firstSelectableIndex !== undefined && !isSelectable(selectedOption)) {
-    setSelectedOriginalIndex(firstSelectableIndex)
+  // If the set of selectable options changes (e.g. extraction reloaded), reset the selection safely.
+  const firstSelectableIndex = selectableOptions[0]?.originalIndex
+  if (firstSelectableIndex !== undefined && !isSelectablePaymentOption(selectedOption)) {
+    setSelectedOriginalIndex(getInitialSelectedPaymentOptionIndex(selectableOptions))
   }
 
   // High-confidence deterministic matches may be prefilled, but remain visibly reviewable.
@@ -112,6 +105,7 @@ export function DocumentReviewForm({
 
   const derivedAmount = selectedOption?.amount ?? proposedObligation?.expected_amount ?? extraction.amount_due.value ?? ''
   const derivedDueDate = selectedOption?.due_date ?? proposedObligation?.due_date ?? extraction.due_date.value ?? ''
+  const canConfirmPayment = !hasPaymentOptions || selectedOriginalIndex !== null
 
   async function handleConfirm(formData: FormData) {
     setIsPending(true)
@@ -272,23 +266,23 @@ export function DocumentReviewForm({
           <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">
             This document contains multiple payment options and deadlines. Select the plan you intend to follow.
           </div>
-          <input type="hidden" name="selected_payment_option_index" value={selectedOriginalIndex} />
+          <input type="hidden" name="selected_payment_option_index" value={selectedOriginalIndex ?? ''} />
           <fieldset className="space-y-3">
             <legend className="font-semibold">Payment options</legend>
-            {selectableOptions.map(({ option, idx }) => (
+            {selectableOptions.map(({ option, originalIndex }) => (
               <label
-                key={idx}
+                key={originalIndex}
                 className={`block rounded-lg border p-3 cursor-pointer transition-colors ${
-                  selectedOriginalIndex === idx ? 'border-foreground bg-foreground/5' : 'hover:bg-foreground/5'
+                  selectedOriginalIndex === originalIndex ? 'border-foreground bg-foreground/5' : 'hover:bg-foreground/5'
                 }`}
               >
                 <div className="flex items-start gap-3">
                   <input
                     type="radio"
                     name="payment_option"
-                    value={idx}
-                    checked={selectedOriginalIndex === idx}
-                    onChange={() => setSelectedOriginalIndex(idx)}
+                    value={originalIndex}
+                    checked={selectedOriginalIndex === originalIndex}
+                    onChange={() => setSelectedOriginalIndex(originalIndex)}
                     className="mt-1"
                   />
                   <div className="flex-1">
@@ -317,14 +311,14 @@ export function DocumentReviewForm({
                       <tr key={i} className="border-b last:border-0">
                         <td className="py-2">{i + 1}</td>
                         <td className="py-2">{formatCurrency(inst.amount)}</td>
-                        <td className="py-2">{formatDate(inst.due_date)}</td>
+                        <td className="py-2">{formatDateOnly(inst.due_date)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               ) : (
                 <div className="text-sm">
-                  <p className="font-medium">{formatCurrency(selectedOption.amount)} due {formatDate(selectedOption.due_date)}</p>
+                  <p className="font-medium">{formatCurrency(selectedOption.amount)} due {formatDateOnly(selectedOption.due_date)}</p>
                 </div>
               )}
 
@@ -436,12 +430,16 @@ export function DocumentReviewForm({
         </section>
       )}
 
+      {hasPaymentOptions && selectedOriginalIndex === null && (
+        <p className="text-sm text-amber-700">Select a payment option before confirming.</p>
+      )}
+
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex flex-wrap gap-3">
         <button
           type="submit"
-          disabled={isPending}
+          disabled={isPending || !canConfirmPayment}
           className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {isPending ? 'Confirming…' : 'Confirm'}

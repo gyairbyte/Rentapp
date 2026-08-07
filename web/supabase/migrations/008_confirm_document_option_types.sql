@@ -1,25 +1,6 @@
--- Harden multi-payment document confirmation integrity.
--- A single document can create multiple obligations, and two source items can legitimately
--- share the same due date, so identity must not rely on (source_document_id, due_date).
--- Add a stable source_item_key and enforce idempotency on (source_document_id, source_item_key).
+-- Tighten confirm_document to accept only genuine, user-selectable payment plan types.
+-- Penalties, late fees, and catch-all 'other' option types are no longer selectable.
 
-alter table public.obligations
-  add column if not exists source_item_key text null;
-
--- Remove any prior per-document uniqueness indexes so multiple source items per document are allowed.
-drop index if exists public.obligations_source_document_id_due_date_unique;
-drop index if exists public.obligations_source_document_id_unique;
-
--- A partial unique index would block ON CONFLICT inference, so use a non-partial index
--- and let source_item_key distinguish items. NULL keys do not conflict.
-create unique index if not exists obligations_source_document_item_unique
-  on public.obligations (source_document_id, source_item_key);
-
--- Atomic, idempotent, trust-boundary-aware document confirmation.
--- Payment plans are authoritative only from the document's stored extraction/AI result;
--- this function validates the selected plan against the supplied p_payment_options.
--- The client submits only a selected option index; the server action must load and
--- validate the document's canonical extraction before calling this function.
 create or replace function public.confirm_document(
   p_user_id uuid,
   p_document_id uuid,
@@ -127,8 +108,8 @@ begin
     v_option := p_payment_options->p_selected_payment_option_index;
     v_option_type := v_option->>'option_type';
 
-    if v_option_type not in ('full', 'discounted', 'installment_plan', 'other') then
-      raise exception 'Unrecognized payment option type' using errcode = 'P0001';
+    if v_option_type not in ('full', 'discounted', 'installment_plan') then
+      raise exception 'Unrecognized or non-selectable payment option type' using errcode = 'P0001';
     end if;
 
     if v_option_type = 'installment_plan' then
@@ -320,4 +301,5 @@ begin
 end;
 $$;
 
-grant execute on function public.confirm_document to authenticated;
+grant execute on function public.confirm_document(uuid, uuid, uuid, uuid, uuid, text, text, date, date, date, date, numeric, text, text, text, text, date, text, jsonb, int) to authenticated;
+grant execute on function public.confirm_document(uuid, uuid, uuid, uuid, uuid, text, text, date, date, date, date, numeric, text, text, text, text, date, text, jsonb, int) to anon;
