@@ -5,11 +5,11 @@ import { randomUUID } from 'crypto'
 import { createClient } from '@/lib/supabase/client'
 import { documentSchema } from '@/lib/validations/document'
 import { requireUser } from './helpers'
-import { formatZodErrors, recalcObligation } from '@/lib/utils'
+import { formatZodErrors } from '@/lib/utils'
 import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, hashFileBuffer } from '@/lib/document-intelligence'
 import { findDocumentMatch } from '@/lib/document-intelligence/matching'
 import { detectSemanticDuplicates } from '@/lib/document-intelligence/duplicates'
-import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, ObligationInsert, TaskInsert, DocumentProcessingRunInsert } from '@/lib/types'
+import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert } from '@/lib/types'
 
 type ActionResult =
   | { success: true; id?: string; duplicateDocumentId?: string }
@@ -415,119 +415,39 @@ export async function confirmDocument(documentId: string, formData: FormData): P
   const user = await requireUser()
   const supabase = await createClient()
 
-  const { data: document } = await supabase
-    .from('documents')
-    .select('*')
-    .eq('id', documentId)
-    .eq('user_id', user.id)
-    .single()
-    .returns<Document>()
-
-  if (!document) return { error: 'Document not found' }
-
   const propertyId = fieldValue(formData, 'property_id')
   if (!propertyId) return { error: 'A property is required to confirm' }
 
-  const accountId = fieldValue(formData, 'account_id')
-  const partyId = fieldValue(formData, 'party_id')
-  const documentType = fieldValue(formData, 'document_type')
-  const issuer = fieldValue(formData, 'issuer')
-  const documentDate = fieldValue(formData, 'document_date')
-  const dueDate = fieldValue(formData, 'due_date')
-  const periodStart = fieldValue(formData, 'period_start')
-  const periodEnd = fieldValue(formData, 'period_end')
   const amountRaw = fieldValue(formData, 'amount')
-  const amount = amountRaw ? Number(amountRaw) : null
-  const direction = (fieldValue(formData, 'direction') as 'payable' | 'receivable') ?? 'payable'
-  const category = fieldValue(formData, 'category') ?? 'other'
-  const description = fieldValue(formData, 'description')
-  const requiredAction = fieldValue(formData, 'required_action')
-  const actionDueDate = fieldValue(formData, 'action_due_date')
-  const taskTitle = fieldValue(formData, 'task_title')
 
-  const shouldCreateObligation = amount !== null && amount > 0 && dueDate
-  const shouldCreateTask = !!requiredAction || !!taskTitle
+  const { data, error } = await (supabase as any).rpc('confirm_document', {
+    p_user_id: user.id,
+    p_document_id: documentId,
+    p_property_id: propertyId,
+    p_account_id: fieldValue(formData, 'account_id'),
+    p_party_id: fieldValue(formData, 'party_id'),
+    p_document_type: fieldValue(formData, 'document_type'),
+    p_issuer: fieldValue(formData, 'issuer'),
+    p_document_date: fieldValue(formData, 'document_date'),
+    p_due_date: fieldValue(formData, 'due_date'),
+    p_period_start: fieldValue(formData, 'period_start'),
+    p_period_end: fieldValue(formData, 'period_end'),
+    p_amount: amountRaw ? Number(amountRaw) : null,
+    p_direction: (fieldValue(formData, 'direction') as 'payable' | 'receivable') ?? 'payable',
+    p_category: fieldValue(formData, 'category') ?? 'other',
+    p_description: fieldValue(formData, 'description'),
+    p_required_action: fieldValue(formData, 'required_action'),
+    p_action_due_date: fieldValue(formData, 'action_due_date'),
+    p_task_title: fieldValue(formData, 'task_title'),
+  })
 
-  let obligationId = document.confirmed_obligation_id
-  let taskId = document.confirmed_task_id
-
-  if (shouldCreateObligation) {
-    const status = recalcObligation(0, amount, dueDate, 'upcoming')
-    const obligationBase: ObligationInsert = {
-      property_id: propertyId,
-      account_id: accountId,
-      party_id: partyId,
-      source_document_id: documentId,
-      direction,
-      category,
-      description: description ?? `${document.original_filename} — ${category}`,
-      expected_amount: amount,
-      paid_amount: 0,
-      due_date: dueDate,
-      status,
-      paid_date: null,
-      period_start: periodStart,
-      period_end: periodEnd,
-      notes: null,
-      user_id: user.id,
-    }
-
-    const { data: upsertedObligation, error: obligationError } = await supabase
-      .from('obligations')
-      .upsert(obligationBase, { onConflict: 'source_document_id' })
-      .select('id')
-      .single()
-
-    if (obligationError || !upsertedObligation) {
-      return { error: obligationError?.message ?? 'Failed to create or update obligation' }
-    }
-    obligationId = upsertedObligation.id
+  if (error) {
+    return { error: error.message }
   }
 
-  if (shouldCreateTask) {
-    const taskBase: TaskInsert = {
-      property_id: propertyId,
-      party_id: partyId,
-      source_document_id: documentId,
-      title: taskTitle ?? requiredAction ?? 'Task',
-      description: requiredAction ?? null,
-      due_date: actionDueDate,
-      status: 'open',
-      priority: 'normal',
-      user_id: user.id,
-    }
-
-    const { data: upsertedTask, error: taskError } = await supabase
-      .from('tasks')
-      .upsert(taskBase, { onConflict: 'source_document_id' })
-      .select('id')
-      .single()
-
-    if (taskError || !upsertedTask) {
-      return { error: taskError?.message ?? 'Failed to create or update task' }
-    }
-    taskId = upsertedTask.id
-  }
-
-  // Only mark the document confirmed after downstream records are persisted.
-  const { error: documentUpdateError } = await supabase
-    .from('documents')
-    .update({
-      property_id: propertyId,
-      account_id: accountId,
-      party_id: partyId,
-      document_type: documentType,
-      issuer,
-      document_date: documentDate,
-      review_status: 'confirmed',
-      confirmed_obligation_id: obligationId,
-      confirmed_task_id: taskId,
-    })
-    .eq('id', documentId)
-    .eq('user_id', user.id)
-
-  if (documentUpdateError) {
-    return { error: documentUpdateError.message }
+  const result = data as { obligation_id?: string | null; task_id?: string | null } | null
+  if (!result) {
+    return { error: 'Confirmation did not return a result' }
   }
 
   revalidatePath('/documents')
