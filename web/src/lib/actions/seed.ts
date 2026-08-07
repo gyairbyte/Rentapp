@@ -11,7 +11,7 @@ export async function seedDemoData(): Promise<{ success: boolean; message: strin
   const user = await requireUser()
   const supabase = createClient()
 
-  const existing = await supabase.from('properties').select('id').eq('user_id', user.id).limit(1).single()
+  const existing = await supabase.from('properties').select('id').eq('user_id', user.id).eq('archived', false).limit(1).single()
   if (existing.data) {
     return { success: false, message: 'Demo data was not created because this account already has properties.' }
   }

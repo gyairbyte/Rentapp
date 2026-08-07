@@ -48,3 +48,7 @@ create trigger properties_updated_at
   before update on public.properties
   for each row
   execute function public.handle_updated_at();
+
+-- Grant table access to Supabase auth roles so RLS policies can be evaluated.
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on table public.properties to anon, authenticated;

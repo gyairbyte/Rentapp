@@ -92,6 +92,7 @@ create table if not exists public.recurring_rules (
   start_date date not null,
   end_date date null,
   active boolean not null default true,
+  notes text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -309,3 +310,9 @@ create policy "Users can delete own documents"
   on storage.objects for delete
   to authenticated
   using (bucket_id = 'documents' and owner = auth.uid());
+
+-- Grant table access to Supabase auth roles so RLS policies can be evaluated.
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated;
+grant select, usage on all sequences in schema public to anon, authenticated;
+grant usage on schema storage to anon, authenticated;
