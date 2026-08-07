@@ -3,6 +3,7 @@ import {
   isSelectablePaymentOption,
   getSelectablePaymentOptions,
   getInitialSelectedPaymentOptionIndex,
+  getSelectableOptionsFingerprint,
   SELECTABLE_OPTION_TYPES,
 } from './payment-options'
 import type { PaymentOption } from './types'
@@ -76,5 +77,54 @@ describe('getInitialSelectedPaymentOptionIndex', () => {
 describe('SELECTABLE_OPTION_TYPES', () => {
   it('contains only genuine user-selectable payment paths', () => {
     expect(SELECTABLE_OPTION_TYPES).toEqual(['full', 'discounted', 'installment_plan'])
+  })
+})
+
+describe('getSelectableOptionsFingerprint', () => {
+  it('is stable for identical selectable option sets', () => {
+    const options: PaymentOption[] = [
+      option({ option_type: 'discounted', amount: 1703.81, due_date: '2026-08-31' }),
+      option({ option_type: 'full', amount: 1756.51, due_date: '2026-10-31' }),
+    ]
+    const selectable = getSelectablePaymentOptions(options)
+    const first = getSelectableOptionsFingerprint(selectable)
+    const second = getSelectableOptionsFingerprint(getSelectablePaymentOptions(options))
+    expect(first).toBe(second)
+  })
+
+  it('changes when option amounts or dates change', () => {
+    const base = getSelectableOptionsFingerprint(
+      getSelectablePaymentOptions([option({ option_type: 'full', amount: 1756.51, due_date: '2026-10-31' })])
+    )
+    const changed = getSelectableOptionsFingerprint(
+      getSelectablePaymentOptions([option({ option_type: 'full', amount: 1800, due_date: '2026-10-31' })])
+    )
+    expect(changed).not.toBe(base)
+  })
+
+  it('changes when option order changes', () => {
+    const a = option({ option_type: 'discounted', amount: 1703.81, due_date: '2026-08-31' })
+    const b = option({ option_type: 'full', amount: 1756.51, due_date: '2026-10-31' })
+    const first = getSelectableOptionsFingerprint(getSelectablePaymentOptions([a, b]))
+    const second = getSelectableOptionsFingerprint(getSelectablePaymentOptions([b, a]))
+    expect(second).not.toBe(first)
+  })
+
+  it('changes when installment details change', () => {
+    const base = option({
+      option_type: 'installment_plan',
+      amount: 1756.51,
+      due_date: '2026-10-31',
+      installments: [{ amount: 439.13, due_date: '2026-08-03', description: 'Installment 1', late_payment_terms: [] }],
+    })
+    const changed = option({
+      option_type: 'installment_plan',
+      amount: 1756.51,
+      due_date: '2026-10-31',
+      installments: [{ amount: 440, due_date: '2026-08-03', description: 'Installment 1', late_payment_terms: [] }],
+    })
+    const baseFingerprint = getSelectableOptionsFingerprint(getSelectablePaymentOptions([base]))
+    const changedFingerprint = getSelectableOptionsFingerprint(getSelectablePaymentOptions([changed]))
+    expect(changedFingerprint).not.toBe(baseFingerprint)
   })
 })

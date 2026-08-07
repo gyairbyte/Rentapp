@@ -249,4 +249,64 @@ describe('DocumentReviewForm payment selection', () => {
     const hiddenInput = container.querySelector('input[name="selected_payment_option_index"]') as HTMLInputElement
     await waitFor(() => expect(hiddenInput.value).toBe('2'))
   })
+
+  it('preserves selection across equivalent rerenders and clears it when payment options materially change', async () => {
+    const baseOptions: PaymentOption[] = [
+      paymentOption({ option_type: 'discounted', amount: 1703.81, due_date: '2026-08-31', description: 'Discounted full' }),
+      paymentOption({ option_type: 'full', amount: 1756.51, due_date: '2026-10-31', description: 'Full base' }),
+    ]
+
+    const { container, rerender } = render(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={makeExtraction(baseOptions)}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+    fireEvent.click(radios[1])
+
+    const hiddenInput = () => container.querySelector('input[name="selected_payment_option_index"]') as HTMLInputElement
+    await waitFor(() => expect(hiddenInput().value).toBe('1'))
+
+    // Equivalent rerender with a new extraction object: the same options should keep the selection.
+    rerender(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={makeExtraction(baseOptions)}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+    expect(hiddenInput().value).toBe('1')
+
+    // Materially changed options: order reversed and amount changed. The stale selection must clear.
+    const changedOptions: PaymentOption[] = [
+      paymentOption({ option_type: 'full', amount: 1800, due_date: '2026-10-31', description: 'Full base' }),
+      paymentOption({ option_type: 'discounted', amount: 1703.81, due_date: '2026-08-31', description: 'Discounted full' }),
+    ]
+    rerender(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={makeExtraction(changedOptions)}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+    await waitFor(() => expect(hiddenInput().value).toBe(''))
+
+    const confirmButton = screen.getByRole('button', { name: /Confirm/i }) as HTMLButtonElement
+    expect(confirmButton.disabled).toBe(true)
+  })
 })

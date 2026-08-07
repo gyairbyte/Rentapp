@@ -10,6 +10,7 @@ import {
   isSelectablePaymentOption,
   getSelectablePaymentOptions,
   getInitialSelectedPaymentOptionIndex,
+  getSelectableOptionsFingerprint,
 } from '@/lib/payment-options'
 import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
@@ -82,14 +83,24 @@ export function DocumentReviewForm({
   const selectableOptions = getSelectablePaymentOptions(paymentOptions)
   const hasPaymentOptions = selectableOptions.length > 0
   const nonSelectableOptions = paymentOptions.filter((option) => !isSelectablePaymentOption(option))
-  const [selectedOriginalIndex, setSelectedOriginalIndex] = useState<number | null>(
-    getInitialSelectedPaymentOptionIndex(selectableOptions)
-  )
+  const currentFingerprint = getSelectableOptionsFingerprint(selectableOptions)
+
+  const [selection, setSelection] = useState<{
+    originalIndex: number | null
+    fingerprint: string
+  }>(() => ({
+    originalIndex: getInitialSelectedPaymentOptionIndex(selectableOptions),
+    fingerprint: getSelectableOptionsFingerprint(selectableOptions),
+  }))
 
   // Derive a safe, valid selection without mutating state during render.
+  // If the authoritative payment options have changed, discard any stale selection.
+  const selectionIsCurrent = selection.fingerprint === currentFingerprint
   const effectiveSelectedOriginalIndex =
-    selectedOriginalIndex !== null && isSelectablePaymentOption(paymentOptions[selectedOriginalIndex])
-      ? selectedOriginalIndex
+    selectionIsCurrent &&
+    selection.originalIndex !== null &&
+    isSelectablePaymentOption(paymentOptions[selection.originalIndex])
+      ? selection.originalIndex
       : getInitialSelectedPaymentOptionIndex(selectableOptions)
   const selectedOption = effectiveSelectedOriginalIndex !== null ? paymentOptions[effectiveSelectedOriginalIndex] ?? null : null
 
@@ -282,7 +293,7 @@ export function DocumentReviewForm({
                     name="payment_option"
                     value={originalIndex}
                     checked={effectiveSelectedOriginalIndex === originalIndex}
-                    onChange={() => setSelectedOriginalIndex(originalIndex)}
+                    onChange={() => setSelection({ originalIndex, fingerprint: currentFingerprint })}
                     className="mt-1"
                   />
                   <div className="flex-1">
