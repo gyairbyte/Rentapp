@@ -16,7 +16,6 @@ export function DocumentReviewForm({
   accounts,
   parties,
   duplicates,
-  processingError,
 }: {
   document: Document
   extraction: DocumentExtraction
@@ -25,7 +24,6 @@ export function DocumentReviewForm({
   accounts: { id: string; property_id: string; account_type: string; account_number: string | null; party_id?: string | null }[]
   parties: { id: string; property_id: string | null; name: string; party_type: string }[]
   duplicates: DuplicateResult[]
-  processingError: string | null
 }) {
   const router = useRouter()
   const [isPending, setIsPending] = useState(false)
@@ -107,28 +105,6 @@ export function DocumentReviewForm({
           <p className="text-sm text-foreground/70">
             Please confirm or correct the property before confirming. A property is required.
           </p>
-        </div>
-      )}
-
-      {processingError && (
-        <div className="rounded-lg border border-red-400 p-4">
-          <p className="text-sm font-medium text-red-600">
-            Document processing could not be completed. Please retry later.
-          </p>
-          <button
-            type="button"
-            onClick={handleRetry}
-            disabled={isPending}
-            className="mt-2 rounded-md border px-3 py-1 text-sm hover:bg-foreground/10 disabled:opacity-50"
-          >
-            {isPending ? 'Retrying…' : 'Retry processing'}
-          </button>
-          {process.env.NODE_ENV !== 'production' && (
-            <details className="mt-2 text-xs text-foreground/60">
-              <summary className="cursor-pointer">Technical details</summary>
-              <pre className="mt-1 whitespace-pre-wrap break-all">{processingError}</pre>
-            </details>
-          )}
         </div>
       )}
 

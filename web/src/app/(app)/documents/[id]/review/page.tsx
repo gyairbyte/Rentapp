@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation'
 import { getDocumentWithDetails } from '@/lib/actions/documents'
 import { getSignedDocumentUrl } from '@/lib/actions/documents'
 import { DocumentReviewForm } from '@/components/document/document-review-form'
+import { DocumentProcessingFailed } from '@/components/document/document-processing-failed'
+import { getDocumentReviewState } from '@/lib/document-review-state'
 import { PROCESSING_STATUSES } from '@/lib/constants'
 
 export const dynamic = 'force-dynamic'
@@ -13,9 +15,7 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
 
   const { document, extraction, run, proposedMatch, properties, accounts, parties, duplicates } = details
   const signedUrl = await getSignedDocumentUrl(document.storage_path)
-
-  const isProcessed = document.processing_status === 'processed'
-  const isFailed = document.processing_status === 'failed'
+  const state = getDocumentReviewState(document, run, process.env.NODE_ENV === 'development')
 
   return (
     <div className="space-y-6">
@@ -25,9 +25,6 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
           <p className="text-sm text-foreground/70">
             {PROCESSING_STATUSES.find((s) => s.value === document.processing_status)?.label ?? document.processing_status}
           </p>
-          {isFailed && document.processing_error && (
-            <p className="text-sm text-red-600 mt-1">{document.processing_error}</p>
-          )}
         </div>
       </div>
 
@@ -49,7 +46,9 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
         </div>
       )}
 
-      {isProcessed || (isFailed && !run) ? (
+      {state.kind === 'failed' ? (
+        <DocumentProcessingFailed documentId={document.id} technicalDetails={state.technicalDetails} />
+      ) : state.kind === 'ready' ? (
         <DocumentReviewForm
           document={document}
           extraction={extraction}
@@ -58,12 +57,9 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
           accounts={accounts}
           parties={parties}
           duplicates={duplicates}
-          processingError={isFailed ? document.processing_error : null}
         />
-      ) : isFailed ? (
-        <p className="text-foreground/70">Processing failed. Try uploading a clearer image or PDF.</p>
       ) : (
-        <p className="text-foreground/70">Processing… check back in a moment.</p>
+        <p className="text-foreground/70">{state.userMessage}</p>
       )}
     </div>
   )
