@@ -5,14 +5,13 @@ import { randomUUID } from 'crypto'
 import { createClient } from '@/lib/supabase/client'
 import { documentSchema } from '@/lib/validations/document'
 import { requireUser } from './helpers'
-import { getProperty } from './property'
 import { formatZodErrors } from '@/lib/utils'
 import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, parseExtraction, hashFileBuffer } from '@/lib/document-intelligence'
 import { findDocumentMatch } from '@/lib/document-intelligence/matching'
 import { detectSemanticDuplicates } from '@/lib/document-intelligence/duplicates'
 import { getSelectablePaymentOptions, isSelectablePaymentOption } from '@/lib/payment-options'
 import { isValidDateOnly, toCents, formatCents, validateInstallmentPlan } from '@/lib/payment-validation'
-import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert, PaymentOption, PaymentInstallment } from '@/lib/types'
+import type { Account, Document, DocumentUpdate, Obligation, Party, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert, PaymentOption, PaymentInstallment } from '@/lib/types'
 
 export type ActionResult =
   | { success: true; id?: string; duplicateDocumentId?: string }
@@ -33,6 +32,90 @@ function tryParseRaw(raw: string | null): unknown {
   } catch {
     return null
   }
+}
+
+type DocumentFkData = {
+  property_id: string | null
+  account_id: string | null
+  party_id: string | null
+  obligation_id: string | null
+}
+
+type ValidatedDocumentFks = {
+  property: { id: string } | null
+  account: { id: string; property_id: string } | null
+  party: { id: string; property_id: string | null } | null
+  obligation: { id: string; property_id: string } | null
+  error: string | null
+}
+
+async function validateDocumentOwnership(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  data: DocumentFkData,
+): Promise<ValidatedDocumentFks> {
+  let property: { id: string } | null = null
+
+  if (data.property_id) {
+    const { data: row, error } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', data.property_id)
+      .eq('user_id', userId)
+      .single()
+    if (error || !row) return { property: null, account: null, party: null, obligation: null, error: 'Property not found' }
+    property = row
+  }
+
+  let account: Account | null = null
+  if (data.account_id) {
+    const { data: row, error } = await supabase
+      .from('accounts')
+      .select('id, property_id')
+      .eq('id', data.account_id)
+      .eq('user_id', userId)
+      .single()
+      .returns<Account>()
+    if (error || !row) return { property, account: null, party: null, obligation: null, error: 'Account not found' }
+    if (property && row.property_id !== property.id) {
+      return { property, account: null, party: null, obligation: null, error: 'Account does not belong to the selected property' }
+    }
+    account = row
+  }
+
+  let party: Party | null = null
+  if (data.party_id) {
+    const { data: row, error } = await supabase
+      .from('parties')
+      .select('id, property_id')
+      .eq('id', data.party_id)
+      .eq('user_id', userId)
+      .single()
+      .returns<Party>()
+    if (error || !row) return { property, account, party: null, obligation: null, error: 'Party not found' }
+    if (property && row.property_id !== null && row.property_id !== property.id) {
+      return { property, account, party: null, obligation: null, error: 'Party does not belong to the selected property' }
+    }
+    party = row
+  }
+
+  let obligation: Obligation | null = null
+  if (data.obligation_id) {
+    const { data: row, error } = await supabase
+      .from('obligations')
+      .select('id, property_id')
+      .eq('id', data.obligation_id)
+      .eq('user_id', userId)
+      .single()
+      .returns<Obligation>()
+    if (error || !row) return { property, account, party, obligation: null, error: 'Obligation not found' }
+    if (property && row.property_id !== property.id) {
+      return { property, account, party, obligation: null, error: 'Obligation does not belong to the selected property' }
+    }
+    obligation = row
+  }
+
+  return { property, account, party, obligation, error: null }
 }
 
 export async function getDocuments(): Promise<Document[]> {
@@ -203,16 +286,15 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
   }
 
   const user = await requireUser()
-
-  // Explicit server-side ownership check for any property context.
-  if (parsed.data.property_id) {
-    const property = await getProperty(parsed.data.property_id)
-    if (!property) {
-      return { error: 'Property not found or does not belong to you' }
-    }
-  }
-
   const supabase = await createClient()
+
+  const ownership = await validateDocumentOwnership(supabase, user.id, {
+    property_id: parsed.data.property_id,
+    account_id: parsed.data.account_id,
+    party_id: parsed.data.party_id,
+    obligation_id: parsed.data.obligation_id,
+  })
+  if (ownership.error) return { error: ownership.error }
 
   const file = formData.get('file') as File | null
   if (!file || file.size === 0) {
@@ -256,22 +338,30 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
     .insert({
       user_id: user.id,
       property_id: parsed.data.property_id,
+      account_id: parsed.data.account_id,
+      party_id: parsed.data.party_id,
+      obligation_id: parsed.data.obligation_id,
       storage_path: storagePath,
       original_filename: file.name,
       file_hash: fileHash,
       file_size: file.size,
       mime_type: mimeType,
-      document_type: parsed.data.document_type,
+      document_type: parsed.data.document_type ?? 'other',
       issuer: parsed.data.issuer,
       document_date: parsed.data.document_date,
+      notes: parsed.data.notes,
       processing_status: 'uploaded',
       review_status: 'unreviewed',
     })
-    .select()
+    .select('id')
     .single()
     .returns<Document>()
 
-  if (error || !data) return { error: error?.message ?? 'Failed to create document' }
+  if (error || !data) {
+    // Clean up the orphaned object when the database record cannot be created.
+    await supabase.storage.from('documents').remove([storagePath]).catch(() => {})
+    return { error: error?.message ?? 'Failed to create document' }
+  }
 
   revalidatePath('/documents')
   revalidatePath('/inbox')
@@ -290,6 +380,57 @@ export async function createDocument(formData: FormData): Promise<ActionResult> 
   await processDocument(uploadResult.id)
 
   return { success: true, id: uploadResult.id }
+}
+
+export async function updateDocument(id: string, formData: FormData): Promise<ActionResult> {
+  const parsed = documentSchema.safeParse(Object.fromEntries(formData))
+  if (!parsed.success) {
+    return { error: 'Validation failed', errors: formatZodErrors(parsed.error) }
+  }
+
+  const user = await requireUser()
+  const supabase = await createClient()
+
+  const { data: existing, error: existingError } = await supabase
+    .from('documents')
+    .select('id, property_id, account_id, party_id, obligation_id')
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .single()
+    .returns<Document>()
+
+  if (existingError || !existing) return { error: 'Document not found' }
+
+  const ownership = await validateDocumentOwnership(supabase, user.id, {
+    property_id: parsed.data.property_id,
+    account_id: parsed.data.account_id,
+    party_id: parsed.data.party_id,
+    obligation_id: parsed.data.obligation_id,
+  })
+  if (ownership.error) return { error: ownership.error }
+
+  const update: DocumentUpdate = {
+    property_id: parsed.data.property_id,
+    account_id: parsed.data.account_id,
+    party_id: parsed.data.party_id,
+    obligation_id: parsed.data.obligation_id,
+    document_type: parsed.data.document_type ?? 'other',
+    issuer: parsed.data.issuer,
+    document_date: parsed.data.document_date,
+    notes: parsed.data.notes,
+  }
+
+  const { error } = await supabase.from('documents').update(update).eq('id', id).eq('user_id', user.id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/documents')
+  revalidatePath('/inbox')
+  revalidatePath('/dashboard')
+  revalidatePath(`/documents/${id}`)
+  if (existing.property_id) revalidatePath(`/properties/${existing.property_id}`)
+  if (update.property_id && update.property_id !== existing.property_id) revalidatePath(`/properties/${update.property_id}`)
+  return { success: true }
 }
 
 export async function processDocument(documentId: string): Promise<ActionResult> {
@@ -747,15 +888,20 @@ export async function deleteDocument(id: string): Promise<ActionResult> {
   const user = await requireUser()
   const supabase = await createClient()
 
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from('documents')
     .select('storage_path,property_id')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
 
-  if (existing?.storage_path) {
-    await supabase.storage.from('documents').remove([existing.storage_path])
+  if (existingError || !existing) return { error: 'Document not found' }
+
+  if (existing.storage_path) {
+    const { error: removeError } = await supabase.storage.from('documents').remove([existing.storage_path])
+    if (removeError) {
+      return { error: `Could not remove stored file: ${removeError.message}` }
+    }
   }
 
   const { error } = await supabase.from('documents').delete().eq('id', id).eq('user_id', user.id)

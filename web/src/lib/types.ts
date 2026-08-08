@@ -210,17 +210,19 @@ export type Document = {
   processing_status: string
   review_status: string
   processing_error: string | null
+  obligation_id: string | null
   confirmed_obligation_id: string | null
   confirmed_task_id: string | null
   duplicate_of_document_id: string | null
   raw_extracted_text: string | null
   raw_ai_extraction: string | null
+  notes: string | null
   created_at: string
   updated_at: string
 }
 
-export type DocumentInsert = Omit<Document, 'id' | 'created_at' | 'updated_at' | 'property_id' | 'account_id' | 'party_id' | 'mime_type' | 'document_type' | 'issuer' | 'document_date' | 'file_hash' | 'file_size' | 'processing_error' | 'confirmed_obligation_id' | 'confirmed_task_id' | 'duplicate_of_document_id' | 'raw_extracted_text' | 'raw_ai_extraction'>
-  & Partial<Pick<Document, 'property_id' | 'account_id' | 'party_id' | 'mime_type' | 'document_type' | 'issuer' | 'document_date' | 'file_hash' | 'file_size' | 'processing_error' | 'confirmed_obligation_id' | 'confirmed_task_id' | 'duplicate_of_document_id' | 'raw_extracted_text' | 'raw_ai_extraction'>>
+export type DocumentInsert = Omit<Document, 'id' | 'created_at' | 'updated_at' | 'property_id' | 'account_id' | 'party_id' | 'obligation_id' | 'mime_type' | 'document_type' | 'issuer' | 'document_date' | 'file_hash' | 'file_size' | 'processing_error' | 'confirmed_obligation_id' | 'confirmed_task_id' | 'duplicate_of_document_id' | 'raw_extracted_text' | 'raw_ai_extraction' | 'notes'>
+  & Partial<Pick<Document, 'property_id' | 'account_id' | 'party_id' | 'obligation_id' | 'mime_type' | 'document_type' | 'issuer' | 'document_date' | 'file_hash' | 'file_size' | 'processing_error' | 'confirmed_obligation_id' | 'confirmed_task_id' | 'duplicate_of_document_id' | 'raw_extracted_text' | 'raw_ai_extraction' | 'notes'>>
 export type DocumentUpdate = Partial<Omit<Document, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
 
 export type Confidence = 'high' | 'medium' | 'low'
