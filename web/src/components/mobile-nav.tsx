@@ -5,10 +5,10 @@ import { usePathname } from 'next/navigation'
 
 const links = [
   { href: '/dashboard', label: 'Dashboard' },
+  { href: '/bills', label: 'Bills' },
   { href: '/inbox', label: 'Inbox' },
   { href: '/add', label: 'Add' },
   { href: '/properties', label: 'Properties' },
-  { href: '/obligations', label: 'Bills' },
 ]
 
 export function MobileNav() {
