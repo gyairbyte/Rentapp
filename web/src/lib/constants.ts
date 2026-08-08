@@ -145,7 +145,7 @@ export const REVIEW_STATUSES = [
 
 export const TASK_STATUSES = [
   { value: 'open', label: 'Open' },
-  { value: 'waiting', label: 'Waiting' },
+  { value: 'in_progress', label: 'In progress' },
   { value: 'completed', label: 'Completed' },
   { value: 'canceled', label: 'Canceled' },
 ]
@@ -154,6 +154,7 @@ export const TASK_PRIORITIES = [
   { value: 'low', label: 'Low' },
   { value: 'normal', label: 'Normal' },
   { value: 'high', label: 'High' },
+  { value: 'urgent', label: 'Urgent' },
 ]
 
 export const REPAIR_STATUSES = [

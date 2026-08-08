@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getDocument, getSignedDocumentUrl } from '@/lib/actions/documents'
+import { getTaskByDocumentId } from '@/lib/actions/tasks'
 import { getObligationsForDocument, getObligation } from '@/lib/actions/obligations'
 import { getProperty } from '@/lib/actions/property'
 import { getAccount } from '@/lib/actions/account'
@@ -16,13 +17,14 @@ export default async function DocumentDetailPage({ params }: { params: Promise<{
   const document = await getDocument(id)
   if (!document) notFound()
 
-  const [property, account, party, linkedObligation, obligations, signedUrl] = await Promise.all([
+  const [property, account, party, linkedObligation, obligations, signedUrl, linkedTask] = await Promise.all([
     document.property_id ? getProperty(document.property_id) : null,
     document.account_id ? getAccount(document.account_id) : null,
     document.party_id ? getParty(document.party_id) : null,
     document.obligation_id ? getObligation(document.obligation_id) : null,
     getObligationsForDocument(id),
     getSignedDocumentUrl(document.storage_path),
+    getTaskByDocumentId(id),
   ])
 
   return (
@@ -63,6 +65,14 @@ export default async function DocumentDetailPage({ params }: { params: Promise<{
             Obligation:{' '}
             <Link href={`/obligations/${linkedObligation.id}`} className="underline">
               {linkedObligation.description ?? linkedObligation.category}
+            </Link>
+          </p>
+        )}
+        {linkedTask && (
+          <p>
+            Task:{' '}
+            <Link href={`/tasks/${linkedTask.id}`} className="underline">
+              {linkedTask.title}
             </Link>
           </p>
         )}

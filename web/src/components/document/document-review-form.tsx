@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   confirmDocument,
@@ -23,7 +24,7 @@ import {
   validateInstallmentPlan,
   formatLatePaymentTerm,
 } from '@/lib/payment-validation'
-import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm, ProposedAction } from '@/lib/types'
+import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm, ProposedAction, Task } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
 
 function formatCurrency(amount: number | null) {
@@ -271,6 +272,7 @@ export function DocumentReviewForm({
   accounts,
   parties,
   duplicates,
+  linkedTask,
 }: {
   document: Document
   extraction: DocumentExtraction
@@ -279,6 +281,7 @@ export function DocumentReviewForm({
   accounts: { id: string; property_id: string; account_type: string; account_number: string | null; party_id?: string | null }[]
   parties: { id: string; property_id: string | null; name: string; party_type: string }[]
   duplicates: DuplicateResult[]
+  linkedTask: Task | null
 }) {
   const router = useRouter()
   const [isPending, setIsPending] = useState(false)
@@ -379,6 +382,17 @@ export function DocumentReviewForm({
 
   return (
     <form action={handleConfirm} className="space-y-6">
+      {linkedTask && (
+        <div className="rounded-lg border p-4 bg-foreground/5">
+          <p className="text-sm">
+            This document created a task:{' '}
+            <Link href={`/tasks/${linkedTask.id}`} className="underline font-medium">
+              {linkedTask.title}
+            </Link>
+          </p>
+        </div>
+      )}
+
       {duplicates.length > 0 && (
         <div className="rounded-lg border border-amber-400 p-4">
           <h3 className="font-semibold">Possible duplicate</h3>
