@@ -12,7 +12,7 @@ type ObligationFormProps = {
   properties: { id: string; nickname: string }[]
   accounts: { id: string; account_type: string; account_number: string | null; property_id: string }[]
   parties: { id: string; name: string }[]
-  action: (formData: FormData) => Promise<{ success: true } | { error: string; errors?: Record<string, string[]> }>
+  action: (formData: FormData) => Promise<{ success: true; id?: string } | { error: string; errors?: Record<string, string[]> }>
   defaultPropertyId?: string
 }
 
@@ -26,8 +26,8 @@ export function ObligationForm({
 }: ObligationFormProps) {
   const router = useRouter()
   const { formAction, error, fieldErrors, isPending } = useFormAction(action, {
-    onSuccess: () => {
-      router.push('/obligations')
+    onSuccess: (result) => {
+      router.push(result.id ? `/obligations/${result.id}` : '/obligations')
       router.refresh()
     },
   })

@@ -9,8 +9,62 @@ import { toMoneyCents } from '@/lib/bills'
 import type { Obligation, Payment } from '@/lib/types'
 
 type ActionResult =
-  | { success: true }
+  | { success: true; id?: string }
   | { error: string; errors?: Record<string, string[]> }
+
+type ObligationFkData = {
+  property_id: string
+  account_id: string | null
+  party_id: string | null
+  recurring_rule_id: string | null
+}
+
+async function validateObligationOwnership(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  data: ObligationFkData,
+): Promise<string | null> {
+  const { data: property, error: propertyError } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('id', data.property_id)
+    .eq('user_id', userId)
+    .single()
+
+  if (propertyError || !property) return 'Property not found'
+
+  if (data.account_id) {
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('id', data.account_id)
+      .eq('user_id', userId)
+      .single()
+    if (accountError || !account) return 'Account not found'
+  }
+
+  if (data.party_id) {
+    const { data: party, error: partyError } = await supabase
+      .from('parties')
+      .select('id')
+      .eq('id', data.party_id)
+      .eq('user_id', userId)
+      .single()
+    if (partyError || !party) return 'Party not found'
+  }
+
+  if (data.recurring_rule_id) {
+    const { data: rule, error: ruleError } = await supabase
+      .from('recurring_rules')
+      .select('id')
+      .eq('id', data.recurring_rule_id)
+      .eq('user_id', userId)
+      .single()
+    if (ruleError || !rule) return 'Recurring rule not found'
+  }
+
+  return null
+}
 
 export async function getObligations(
   options: { propertyId?: string; direction?: string; status?: string; includeResolved?: boolean } = {}
@@ -78,22 +132,34 @@ export async function createObligation(formData: FormData): Promise<ActionResult
   const user = await requireUser()
   const supabase = await createClient()
 
+  const ownershipError = await validateObligationOwnership(supabase, user.id, {
+    property_id: parsed.data.property_id,
+    account_id: parsed.data.account_id,
+    party_id: parsed.data.party_id,
+    recurring_rule_id: parsed.data.recurring_rule_id,
+  })
+  if (ownershipError) return { error: ownershipError }
+
   const status = recalcObligation(0, parsed.data.expected_amount, parsed.data.due_date, 'upcoming')
 
-  const { error } = await supabase.from('obligations').insert({
-    ...parsed.data,
-    user_id: user.id,
-    paid_amount: 0,
-    status,
-    paid_date: null,
-  })
+  const { data, error } = await supabase
+    .from('obligations')
+    .insert({
+      ...parsed.data,
+      user_id: user.id,
+      paid_amount: 0,
+      status,
+      paid_date: null,
+    })
+    .select('id')
+    .single()
 
   if (error) return { error: error.message }
 
   revalidatePath('/obligations')
   revalidatePath('/dashboard')
   revalidatePath(`/properties/${parsed.data.property_id}`)
-  return { success: true }
+  return { success: true, id: data?.id }
 }
 
 export async function updateObligation(id: string, formData: FormData): Promise<ActionResult> {
@@ -105,15 +171,25 @@ export async function updateObligation(id: string, formData: FormData): Promise<
   const user = await requireUser()
   const supabase = await createClient()
 
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from('obligations')
-    .select('paid_amount')
+    .select('*')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
 
-  const paidAmount = existing?.paid_amount ?? 0
-  const status = recalcObligation(paidAmount, parsed.data.expected_amount, parsed.data.due_date, parsed.data.status ?? 'upcoming')
+  if (existingError || !existing) return { error: 'Obligation not found' }
+
+  const ownershipError = await validateObligationOwnership(supabase, user.id, {
+    property_id: parsed.data.property_id,
+    account_id: parsed.data.account_id,
+    party_id: parsed.data.party_id,
+    recurring_rule_id: parsed.data.recurring_rule_id,
+  })
+  if (ownershipError) return { error: ownershipError }
+
+  const paidAmount = existing.paid_amount ?? 0
+  const status = recalcObligation(paidAmount, parsed.data.expected_amount, parsed.data.due_date, existing.status)
 
   const { error } = await supabase
     .from('obligations')
@@ -127,6 +203,7 @@ export async function updateObligation(id: string, formData: FormData): Promise<
   revalidatePath('/dashboard')
   revalidatePath(`/obligations/${id}`)
   if (parsed.data.property_id) revalidatePath(`/properties/${parsed.data.property_id}`)
+  if (existing.property_id !== parsed.data.property_id) revalidatePath(`/properties/${existing.property_id}`)
   return { success: true }
 }
 

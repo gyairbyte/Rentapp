@@ -3,21 +3,25 @@ import { z } from 'zod'
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/
 
 export function optionalUuid() {
-  return z.union([z.literal(''), z.string().uuid()]).transform((v) => (v === '' ? null : v))
+  return z
+    .union([z.literal(''), z.string().uuid()])
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : v))
 }
 
 export function optionalString() {
-  return z.string().transform((v) => v.trim() || null)
+  return z.string().optional().transform((v) => (v === undefined ? null : v.trim() || null))
 }
 
 export function optionalText() {
-  return z.string().transform((v) => v.trim() || null)
+  return z.string().optional().transform((v) => (v === undefined ? null : v.trim() || null))
 }
 
 export function optionalDate() {
   return z
     .union([z.literal(''), z.string().regex(dateRegex)])
-    .transform((v) => (v === '' ? null : v))
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : v))
 }
 
 export function requiredDate() {
