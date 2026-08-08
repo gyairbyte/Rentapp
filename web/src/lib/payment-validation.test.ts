@@ -122,13 +122,33 @@ describe('validateInstallmentPlan', () => {
     expect(result.differenceCents).toBe(0)
   })
 
-  it('rejects a missing plan amount', () => {
-    const option = installmentPlan([{ amount: 100, due_date: '2026-08-01' }])
+  it('rejects a missing plan amount and still reports the calculated installment total', () => {
+    const option = installmentPlan([
+      { amount: 439.13, due_date: '2026-08-03' },
+      { amount: 439.13, due_date: '2026-09-14' },
+      { amount: 439.13, due_date: '2026-10-31' },
+      { amount: 439.13, due_date: '2026-12-07' },
+    ])
     option.amount = null
 
     const result = validateInstallmentPlan(option)
     expect(result.valid).toBe(false)
-    expect(result.error).toContain('Plan amount')
+    expect(result.planTotalCents).toBeNull()
+    expect(result.planTotalFormatted).toBe('')
+    expect(result.installmentTotalCents).toBe(175652)
+    expect(result.installmentTotalFormatted).toBe('$1,756.52')
+    expect(result.differenceCents).toBeNull()
+    expect(result.differenceFormatted).toBe('')
+    expect(result.error).toBe('Enter the plan total from the document')
+  })
+
+  it('does not represent a missing plan amount as $0.00', () => {
+    const option = installmentPlan([{ amount: 100, due_date: '2026-08-01' }])
+    option.amount = null
+
+    const result = validateInstallmentPlan(option)
+    expect(result.planTotalFormatted).not.toContain('$0.00')
+    expect(result.installmentTotalFormatted).toBe('$100.00')
   })
 
   it('rejects a nonpositive installment amount', () => {

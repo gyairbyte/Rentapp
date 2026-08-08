@@ -94,6 +94,25 @@ function makeExtraction(paymentOptions: PaymentOption[] = []): DocumentExtractio
   }
 }
 
+function makeMissingPlanExtraction(): DocumentExtraction {
+  const extraction = makeExtraction([
+    paymentOption({
+      option_type: 'installment_plan',
+      amount: null,
+      due_date: '2026-10-31',
+      description: 'Four installments',
+      installments: [
+        { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4', late_payment_terms: [] },
+        { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4', late_payment_terms: [] },
+        { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4', late_payment_terms: [] },
+        { amount: 439.13, due_date: '2026-12-07', description: 'Installment 4 of 4', late_payment_terms: [] },
+      ],
+    }),
+  ])
+  // makeExtraction already sets amount_due and expected_amount to 1756.51
+  return extraction
+}
+
 function makeLegacyExtractionRaw(): unknown {
   const extraction: Record<string, unknown> = { ...emptyExtraction() }
   extraction.document_type = 'school_tax'
@@ -428,6 +447,57 @@ describe('DocumentReviewForm payment selection', () => {
     expect(confirmButton.disabled).toBe(true)
   })
 
+  it('suggests the bill total and enables saving a missing plan amount', async () => {
+    const extraction = makeMissingPlanExtraction()
+
+    const { container } = render(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={extraction}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+    fireEvent.click(radios[0])
+
+    await waitFor(() => expect(container.textContent).toContain('Schedule cannot be confirmed'))
+    expect(container.textContent).toContain('Installment total: $1,756.52')
+    expect(container.textContent).toContain('Enter the plan total from the document')
+    expect(container.textContent).not.toContain('Plan total $0.00')
+
+    const editButton = await waitFor(() => screen.getByRole('button', { name: /Edit schedule/i }))
+    fireEvent.click(editButton)
+
+    const planTotalInput = screen.getByLabelText('Plan total') as HTMLInputElement
+    expect(planTotalInput.value).toBe('1756.51')
+    expect(screen.getByText(/Suggested from the bill/i)).toBeDefined()
+
+    const amountInputs = screen.getAllByLabelText(/amount/i) as HTMLInputElement[]
+    fireEvent.change(amountInputs[3], { target: { value: '439.12' } })
+
+    await waitFor(() => expect(container.textContent).toContain('Difference: $0.00'))
+    const saveButton = screen.getByRole('button', { name: /Save corrections/i }) as HTMLButtonElement
+    await waitFor(() => expect(saveButton.disabled).toBe(false))
+
+    fireEvent.click(screen.getByRole('button', { name: /Save corrections/i }))
+
+    await waitFor(() => {
+      expect(saveCorrectedInstallmentSchedule).toHaveBeenCalledWith(
+        'd-1',
+        0,
+        '1756.51',
+        expect.arrayContaining([
+          expect.objectContaining({ amount: '439.12', due_date: '2026-12-07' }),
+        ]),
+      )
+    })
+  })
+
   it('recalculates totals while editing and saves a corrected schedule', async () => {
     const extraction = makeExtraction([
       paymentOption({
@@ -473,6 +543,7 @@ describe('DocumentReviewForm payment selection', () => {
       expect(saveCorrectedInstallmentSchedule).toHaveBeenCalledWith(
         'd-1',
         0,
+        '1756.51',
         expect.arrayContaining([
           expect.objectContaining({ amount: '439.12', due_date: '2026-12-07' }),
         ]),

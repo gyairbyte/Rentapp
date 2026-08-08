@@ -200,6 +200,19 @@ function makeUnbalancedTaxExtraction(): DocumentExtraction {
   return extraction
 }
 
+function makeMissingPlanTaxExtraction(): DocumentExtraction {
+  const extraction = makeTaxExtraction()
+  const obligationAction = extraction.proposed_actions.find((a) => a.type === 'obligation')
+  const option = obligationAction?.payment_options.find((o) => o.option_type === 'installment_plan')
+  if (option) {
+    option.amount = null
+  }
+  if (option && option.installments) {
+    option.installments[3].amount = 439.13
+  }
+  return extraction
+}
+
 function makeSupabaseClient({
   extraction,
   rpcReturn,
@@ -536,7 +549,7 @@ describe('saveCorrectedInstallmentSchedule', () => {
     const client = makeSupabaseClient({ extraction })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.51', [
       { amount: '439.13', due_date: '2026-08-03' },
       { amount: '439.13', due_date: '2026-09-14' },
       { amount: '439.13', due_date: '2026-10-31' },
@@ -576,7 +589,7 @@ describe('saveCorrectedInstallmentSchedule', () => {
     const client = makeSupabaseClient({ extraction })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.51', [
       { amount: '439.13', due_date: '2026-08-03' },
       { amount: '439.13', due_date: '2026-09-14' },
       { amount: '439.13', due_date: '2026-10-31' },
@@ -592,12 +605,15 @@ describe('saveCorrectedInstallmentSchedule', () => {
           payment_options?: { amount?: number; installments?: { amount?: number }[] }[]
         }[]
       }
+      raw_output?: { correction?: { plan_amount?: number; installments?: unknown[] } }
     }
     const proposedActions = insertedRun?.normalized_extraction?.proposed_actions ?? []
     expect(proposedActions).toHaveLength(2)
     expect(proposedActions[1]?.description).toBe('Water bill')
     expect(proposedActions[1]?.payment_options?.[0]?.amount).toBe(100)
+    expect(proposedActions[0]?.payment_options?.[2]?.amount).toBe(1756.51)
     expect(proposedActions[0]?.payment_options?.[2]?.installments?.[3]?.amount).toBe(439.12)
+    expect(insertedRun?.raw_output?.correction?.plan_amount).toBe(1756.51)
   })
 
   it('rejects an unbalanced corrected schedule', async () => {
@@ -605,7 +621,7 @@ describe('saveCorrectedInstallmentSchedule', () => {
     const client = makeSupabaseClient({ extraction })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.51', [
       { amount: '439.13', due_date: '2026-08-03' },
       { amount: '439.13', due_date: '2026-09-14' },
       { amount: '439.13', due_date: '2026-10-31' },
@@ -621,7 +637,7 @@ describe('saveCorrectedInstallmentSchedule', () => {
     const client = makeSupabaseClient({ extraction })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.51', [
       { amount: '439.125', due_date: '2026-08-03' },
       { amount: '439.13', due_date: '2026-09-14' },
       { amount: '439.13', due_date: '2026-10-31' },
@@ -637,7 +653,7 @@ describe('saveCorrectedInstallmentSchedule', () => {
     const client = makeSupabaseClient({ extraction })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.51', [
       { amount: '439.13', due_date: '2026-13-01' },
       { amount: '439.13', due_date: '2026-09-14' },
       { amount: '439.13', due_date: '2026-10-31' },
@@ -653,7 +669,7 @@ describe('saveCorrectedInstallmentSchedule', () => {
     const client = makeSupabaseClient({ extraction })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.51', [
       { amount: '439.13', due_date: '2026-08-03' },
       { amount: '439.13', due_date: '2026-09-14' },
       { amount: '439.13', due_date: '2026-10-31' },
@@ -669,7 +685,7 @@ describe('saveCorrectedInstallmentSchedule', () => {
     const client = makeSupabaseClient({ extraction })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.51', [
       { amount: '439.13', due_date: '2026-08-03' },
       { amount: '439.12', due_date: '2026-09-14' },
     ])
@@ -678,16 +694,104 @@ describe('saveCorrectedInstallmentSchedule', () => {
     expect((result as { error: string }).error).toContain('count')
   })
 
+  it('rejects a missing plan total', async () => {
+    const extraction = makeMissingPlanTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '', [
+      { amount: '439.13', due_date: '2026-08-03' },
+      { amount: '439.13', due_date: '2026-09-14' },
+      { amount: '439.13', due_date: '2026-10-31' },
+      { amount: '439.12', due_date: '2026-12-07' },
+    ])
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('Plan total')
+    const runBuilder = client.from('document_processing_runs')
+    expect(runBuilder.insert).not.toHaveBeenCalled()
+  })
+
+  it('saves a plan total supplied for an extraction missing option amount', async () => {
+    const extraction = makeMissingPlanTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.51', [
+      { amount: '439.13', due_date: '2026-08-03' },
+      { amount: '439.13', due_date: '2026-09-14' },
+      { amount: '439.13', due_date: '2026-10-31' },
+      { amount: '439.12', due_date: '2026-12-07' },
+    ])
+
+    expect(result).toEqual({ success: true })
+    const runBuilder = client.from('document_processing_runs')
+    const insertedRun = runBuilder.insert.mock.calls[0][0] as {
+      normalized_extraction?: {
+        proposed_actions?: { payment_options?: { amount?: number }[] }[]
+      }
+    }
+    expect(insertedRun?.normalized_extraction?.proposed_actions?.[0]?.payment_options?.[2]?.amount).toBe(1756.51)
+  })
+
+  it('rejects a malformed plan total', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, 'abc', [
+      { amount: '439.13', due_date: '2026-08-03' },
+      { amount: '439.13', due_date: '2026-09-14' },
+      { amount: '439.13', due_date: '2026-10-31' },
+      { amount: '439.12', due_date: '2026-12-07' },
+    ])
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('Plan total')
+  })
+
+  it('rejects a plan total with more than two decimal places', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '1756.519', [
+      { amount: '439.13', due_date: '2026-08-03' },
+      { amount: '439.13', due_date: '2026-09-14' },
+      { amount: '439.13', due_date: '2026-10-31' },
+      { amount: '439.12', due_date: '2026-12-07' },
+    ])
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('valid to cents')
+  })
+
+  it('rejects a nonpositive plan total', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, '0', [
+      { amount: '439.13', due_date: '2026-08-03' },
+      { amount: '439.13', due_date: '2026-09-14' },
+      { amount: '439.13', due_date: '2026-10-31' },
+      { amount: '439.12', due_date: '2026-12-07' },
+    ])
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('positive')
+  })
+
   it('rejects a non-integer or out-of-range selected option index', async () => {
     const extraction = makeTaxExtraction()
     const client = makeSupabaseClient({ extraction })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
-    await expect(saveCorrectedInstallmentSchedule('d-1', 1.5, [
+    await expect(saveCorrectedInstallmentSchedule('d-1', 1.5, '1756.51', [
       { amount: '439.12', due_date: '2026-12-07' },
     ])).resolves.toEqual({ error: 'Invalid payment option selection' })
 
-    await expect(saveCorrectedInstallmentSchedule('d-1', NaN, [
+    await expect(saveCorrectedInstallmentSchedule('d-1', NaN, '1756.51', [
       { amount: '439.12', due_date: '2026-12-07' },
     ])).resolves.toEqual({ error: 'Invalid payment option selection' })
   })
