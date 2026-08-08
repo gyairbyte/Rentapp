@@ -11,14 +11,24 @@ type PaymentFormProps = {
   payment?: Payment | null
   obligations: { id: string; description: string | null; expected_amount: number; paid_amount: number; due_date: string }[]
   defaultObligationId?: string
+  defaultAmount?: number
+  returnUrl?: string
   action: (formData: FormData) => Promise<{ success: true } | { error: string; errors?: Record<string, string[]> }>
 }
 
-export function PaymentForm({ payment, obligations, defaultObligationId, action }: PaymentFormProps) {
+export function PaymentForm({
+  payment,
+  obligations,
+  defaultObligationId,
+  defaultAmount,
+  returnUrl,
+  action,
+}: PaymentFormProps) {
   const router = useRouter()
   const { formAction, error, fieldErrors, isPending } = useFormAction(action, {
     onSuccess: () => {
-      router.push('/obligations')
+      const safeReturn = returnUrl && returnUrl.startsWith('/') && !returnUrl.startsWith('//') ? returnUrl : null
+      router.push(safeReturn ?? '/obligations')
       router.refresh()
     },
   })
@@ -29,19 +39,34 @@ export function PaymentForm({ payment, obligations, defaultObligationId, action 
     ? selectedObligation.expected_amount - selectedObligation.paid_amount
     : 0
 
+  const amountDefault = payment?.amount ?? defaultAmount ?? remaining
+
+  const obligationLabel = selectedObligation
+    ? `${selectedObligation.description || 'Obligation'} — $${selectedObligation.expected_amount.toFixed(2)} due ${selectedObligation.due_date}`
+    : 'Obligation'
+
   return (
     <form action={formAction} className="max-w-xl space-y-4">
-      <SelectField
-        name="obligation_id"
-        label="Obligation"
-        options={obligations.map((o) => ({
-          value: o.id,
-          label: `${o.description || 'Obligation'} — $${o.expected_amount.toFixed(2)} due ${o.due_date}`,
-        }))}
-        defaultValue={selectedObligationId}
-        error={fieldErrors.obligation_id?.[0]}
-        required
-      />
+      {payment ? (
+        <div>
+          <input type="hidden" name="obligation_id" defaultValue={payment.obligation_id} />
+          <label className="text-sm font-medium">Obligation</label>
+          <p className="mt-1 rounded-md border px-3 py-2 text-sm text-foreground/70">{obligationLabel}</p>
+          <p className="mt-1 text-xs text-foreground/50">Obligation is locked when editing a payment</p>
+        </div>
+      ) : (
+        <SelectField
+          name="obligation_id"
+          label="Obligation"
+          options={obligations.map((o) => ({
+            value: o.id,
+            label: `${o.description || 'Obligation'} — $${o.expected_amount.toFixed(2)} due ${o.due_date}`,
+          }))}
+          defaultValue={selectedObligationId}
+          error={fieldErrors.obligation_id?.[0]}
+          required
+        />
+      )}
       {selectedObligation && (
         <p className="text-sm text-foreground/70">
           Remaining: <span className="font-medium">${remaining.toFixed(2)}</span>
@@ -53,7 +78,7 @@ export function PaymentForm({ payment, obligations, defaultObligationId, action 
         type="number"
         step="0.01"
         min="0"
-        defaultValue={payment?.amount ?? ''}
+        defaultValue={amountDefault > 0 ? amountDefault : ''}
         error={fieldErrors.amount?.[0]}
         required
       />
@@ -94,7 +119,7 @@ export function PaymentForm({ payment, obligations, defaultObligationId, action 
           {isPending ? 'Saving…' : payment ? 'Save changes' : 'Record payment'}
         </button>
         <Link
-          href="/obligations"
+          href={returnUrl && returnUrl.startsWith('/') && !returnUrl.startsWith('//') ? returnUrl : '/obligations'}
           className="rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:bg-foreground/10"
         >
           Cancel

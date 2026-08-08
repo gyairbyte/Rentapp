@@ -87,6 +87,7 @@ export default async function BillDetailPage({ params }: { params: Promise<{ id:
                 <th className="text-left px-4 py-2 font-medium">Due date</th>
                 <th className="text-left px-4 py-2 font-medium">Status</th>
                 <th className="text-left px-4 py-2 font-medium">Paid</th>
+                <th className="text-left px-4 py-2 font-medium">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -114,6 +115,16 @@ export default async function BillDetailPage({ params }: { params: Promise<{ id:
                     )}
                     {!obligation.paid_amount && <span className="text-foreground/50">—</span>}
                   </td>
+                  <td className="px-4 py-3">
+                    {obligation.remaining_cents > 0 && !['canceled', 'waived'].includes(obligation.derived_status) && (
+                      <Link
+                        href={`/obligations/${obligation.id}/pay?returnTo=${encodeURIComponent(`/bills/${id}`)}`}
+                        className="rounded-md bg-foreground text-background px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-90"
+                      >
+                        Record payment
+                      </Link>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -133,12 +144,18 @@ export default async function BillDetailPage({ params }: { params: Promise<{ id:
         <section>
           <h2 className="text-lg font-semibold mb-3">Payment history</h2>
           <ul className="space-y-2">
-            {bill.obligations.flatMap((o) =>
+            {bill.obligations.flatMap((o, index) =>
               o.payments.map((payment) => (
                 <li key={payment.id} className="rounded-md border p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm">
-                  <span>{formatDateOnly(payment.payment_date)}</span>
-                  <span className="font-medium">{formatMoney(toMoneyCents(payment.amount))}</span>
-                  {payment.method && <span className="text-foreground/70 capitalize">{payment.method}</span>}
+                  <div>
+                    <span className="font-medium">Installment {index + 1}</span>
+                    {o.description && <span className="text-foreground/70"> · {o.description}</span>}
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-right">
+                    <span className="font-medium">{formatMoney(toMoneyCents(payment.amount))}</span>
+                    <span className="text-foreground/70">{formatDateOnly(payment.payment_date)}</span>
+                    {payment.method && <span className="text-foreground/60 capitalize">{payment.method}</span>}
+                  </div>
                 </li>
               )),
             )}

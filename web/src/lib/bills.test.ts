@@ -132,6 +132,25 @@ describe('buildBillsFromObligations', () => {
     expect(bill.status).toBe('overdue')
   })
 
+  it('marks the first installment paid and reduces the bill remaining balance by the payment amount', () => {
+    const obligations = [
+      makeObligation({ id: 'o1', source_document_id: 'doc-1', source_item_key: 'option_2:installment_1', expected_amount: 439.13, paid_amount: 439.13, due_date: '2026-08-03', status: 'paid' }),
+      makeObligation({ id: 'o2', source_document_id: 'doc-1', source_item_key: 'option_2:installment_2', expected_amount: 439.13, due_date: '2026-09-14' }),
+      makeObligation({ id: 'o3', source_document_id: 'doc-1', source_item_key: 'option_2:installment_3', expected_amount: 439.13, due_date: '2026-10-31' }),
+      makeObligation({ id: 'o4', source_document_id: 'doc-1', source_item_key: 'option_2:installment_4', expected_amount: 439.12, due_date: '2026-12-07' }),
+    ]
+
+    const bills = buildBillsFromObligations(obligations, baseDeps, today)
+    expect(bills[0].total_cents).toBe(175651)
+    expect(bills[0].remaining_cents).toBe(131738)
+    expect(bills[0].paid_cents).toBe(43913)
+    expect(bills[0].overdue_cents).toBe(0)
+    expect(bills[0].paid_count).toBe(1)
+    expect(bills[0].obligations[0].derived_status).toBe('paid')
+    expect(bills[0].obligations[0].remaining_cents).toBe(0)
+    expect(bills[0].obligations[3].remaining_cents).toBe(43912)
+  })
+
   it('sums remaining balance correctly when the first installment is partially paid', () => {
     const obligations = [
       makeObligation({ id: 'o1', source_document_id: 'doc-1', source_item_key: 'option_2:installment_1', expected_amount: 439.13, paid_amount: 200, due_date: '2026-08-03' }),

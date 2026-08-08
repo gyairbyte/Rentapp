@@ -147,6 +147,58 @@ describeDb('bills read model from database', () => {
     expect(totals).toEqual([10000, 20000])
   })
 
+  it('reduces the grouped bill remaining balance and marks the paid installment as paid', async () => {
+    const documentId = await createTestDocument(client, userId, {})
+
+    const { rows: [installment1] } = await client.query<{ id: string }>(
+      `insert into public.obligations (user_id, property_id, source_document_id, source_item_key, direction, category, description, expected_amount, paid_amount, due_date, status)
+       values ($1, $2, $3, $4, 'payable', 'school_tax', 'Installment 1 of 4', 439.13, 0, '2026-08-03', 'upcoming') returning id`,
+      [userId, propertyId, documentId, 'option_2:installment_1'],
+    )
+    await client.query(
+      `insert into public.obligations (user_id, property_id, source_document_id, source_item_key, direction, category, description, expected_amount, paid_amount, due_date, status)
+       values ($1, $2, $3, $4, 'payable', 'school_tax', 'Installment 2 of 4', 439.13, 0, '2026-09-14', 'upcoming')`,
+      [userId, propertyId, documentId, 'option_2:installment_2'],
+    )
+    await client.query(
+      `insert into public.obligations (user_id, property_id, source_document_id, source_item_key, direction, category, description, expected_amount, paid_amount, due_date, status)
+       values ($1, $2, $3, $4, 'payable', 'school_tax', 'Installment 3 of 4', 439.13, 0, '2026-10-31', 'upcoming')`,
+      [userId, propertyId, documentId, 'option_2:installment_3'],
+    )
+    await client.query(
+      `insert into public.obligations (user_id, property_id, source_document_id, source_item_key, direction, category, description, expected_amount, paid_amount, due_date, status)
+       values ($1, $2, $3, $4, 'payable', 'school_tax', 'Installment 4 of 4', 439.12, 0, '2026-12-07', 'upcoming')`,
+      [userId, propertyId, documentId, 'option_2:installment_4'],
+    )
+
+    await client.query(
+      `insert into public.payments (user_id, property_id, obligation_id, amount, payment_date, method)
+       values ($1, $2, $3, 439.13, '2026-08-07', 'check')`,
+      [userId, propertyId, installment1.id],
+    )
+
+    // Simulate syncObligationPayments updating the obligation after the payment insert.
+    await client.query(
+      `update public.obligations set paid_amount = 439.13, status = 'paid', paid_date = '2026-08-07' where id = $1`,
+      [installment1.id],
+    )
+
+    const bills = await loadBillsData('2026-08-07')
+
+    expect(bills).toHaveLength(1)
+    const bill = bills[0]
+    expect(bill.total_cents).toBe(175651)
+    expect(bill.paid_cents).toBe(43913)
+    expect(bill.remaining_cents).toBe(131738)
+    expect(bill.overdue_cents).toBe(0)
+    expect(bill.paid_count).toBe(1)
+    expect(bill.obligations).toHaveLength(4)
+    expect(bill.obligations[0].derived_status).toBe('paid')
+    expect(bill.obligations[0].remaining_cents).toBe(0)
+    expect(bill.obligations[1].derived_status).toBe('upcoming')
+    expect(bill.obligations[3].remaining_cents).toBe(43912)
+  })
+
   it('isolates rows by user_id when multiple users have obligations', async () => {
     const otherUserId = await setupTestUser(client)
     const otherPropertyId = await createTestProperty(client, otherUserId)
