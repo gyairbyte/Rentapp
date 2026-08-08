@@ -63,6 +63,12 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         </div>
         <div className="flex gap-2">
           <Link
+            href={`/documents/capture?propertyId=${property.id}`}
+            className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90"
+          >
+            Scan bill
+          </Link>
+          <Link
             href={`/properties/${property.id}/edit`}
             className="rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:bg-foreground/10"
           >

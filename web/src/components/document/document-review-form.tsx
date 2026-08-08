@@ -187,17 +187,18 @@ function InstallmentScheduleEditor({
         )}
       </div>
 
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-foreground/60 border-b">
-            <th className="pb-2 font-medium">#</th>
-            <th className="pb-2 font-medium">Amount</th>
-            <th className="pb-2 font-medium">Due date</th>
-            <th className="pb-2 font-medium">Late amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {installments.map((inst, i) => (
+      <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+        <table className="w-full min-w-[400px] text-sm">
+          <thead>
+            <tr className="text-left text-foreground/60 border-b">
+              <th className="pb-2 font-medium">#</th>
+              <th className="pb-2 font-medium">Amount</th>
+              <th className="pb-2 font-medium">Due date</th>
+              <th className="pb-2 font-medium">Late amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {installments.map((inst, i) => (
             <tr key={i} className="border-b last:border-0">
               <td className="py-2">{i + 1}</td>
               <td className="py-2 pr-2">
@@ -225,8 +226,9 @@ function InstallmentScheduleEditor({
               <td className="py-2 text-foreground/70">{installmentLateDisplay(inst)}</td>
             </tr>
           ))}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
 
       <div className="text-sm space-y-1">
         {editValidation.planTotalCents !== null ? (
@@ -450,7 +452,7 @@ export function DocumentReviewForm({
       {proposedObligation && (
         <section className="rounded-lg border p-4 space-y-3">
           <h2 className="text-lg font-semibold">Bill summary</h2>
-          <dl className="grid grid-cols-2 gap-2 text-sm">
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
             {extraction.document_type && (
               <>
                 <dt className="text-foreground/60">Document type</dt>
@@ -557,26 +559,28 @@ export function DocumentReviewForm({
                       onCancel={() => setIsEditingSchedule(false)}
                     />
                   ) : (
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-foreground/60 border-b">
-                          <th className="pb-2 font-medium">#</th>
-                          <th className="pb-2 font-medium">Amount</th>
-                          <th className="pb-2 font-medium">Due date</th>
-                          <th className="pb-2 font-medium">Late amount</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(selectedOption.installments ?? []).map((inst, i) => (
-                          <tr key={i} className="border-b last:border-0">
-                            <td className="py-2">{i + 1}</td>
-                            <td className="py-2">{formatCurrency(inst.amount)}</td>
-                            <td className="py-2">{formatDateOnly(inst.due_date)}</td>
-                            <td className="py-2 text-foreground/70">{installmentLateDisplay(inst)}</td>
+                    <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                      <table className="w-full min-w-[400px] text-sm">
+                        <thead>
+                          <tr className="text-left text-foreground/60 border-b">
+                            <th className="pb-2 font-medium">#</th>
+                            <th className="pb-2 font-medium">Amount</th>
+                            <th className="pb-2 font-medium">Due date</th>
+                            <th className="pb-2 font-medium">Late amount</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {(selectedOption.installments ?? []).map((inst, i) => (
+                            <tr key={i} className="border-b last:border-0">
+                              <td className="py-2">{i + 1}</td>
+                              <td className="py-2">{formatCurrency(inst.amount)}</td>
+                              <td className="py-2">{formatDateOnly(inst.due_date)}</td>
+                              <td className="py-2 text-foreground/70">{installmentLateDisplay(inst)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
 
                   {installmentValidation && !installmentValidation.valid && !isEditingSchedule && (

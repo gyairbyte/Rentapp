@@ -13,7 +13,7 @@ import { getSelectablePaymentOptions, isSelectablePaymentOption } from '@/lib/pa
 import { isValidDateOnly, toCents, formatCents, validateInstallmentPlan } from '@/lib/payment-validation'
 import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert, PaymentOption, PaymentInstallment } from '@/lib/types'
 
-type ActionResult =
+export type ActionResult =
   | { success: true; id?: string; duplicateDocumentId?: string }
   | { error: string; errors?: Record<string, string[]>; duplicateDocumentId?: string }
 
@@ -195,7 +195,7 @@ async function findDuplicateCandidates(
   return detectSemanticDuplicates(extraction, typed, documentPropertyId)
 }
 
-export async function createDocument(formData: FormData): Promise<ActionResult> {
+export async function uploadDocument(formData: FormData): Promise<ActionResult> {
   const parsed = documentSchema.safeParse(Object.fromEntries(formData))
   if (!parsed.success) {
     return { error: 'Validation failed', errors: formatZodErrors(parsed.error) }
@@ -268,11 +268,18 @@ export async function createDocument(formData: FormData): Promise<ActionResult> 
   revalidatePath('/dashboard')
   if (parsed.data.property_id) revalidatePath(`/properties/${parsed.data.property_id}`)
 
+  return { success: true, id: data.id }
+}
+
+export async function createDocument(formData: FormData): Promise<ActionResult> {
+  const uploadResult = await uploadDocument(formData)
+  if ('error' in uploadResult || !uploadResult.id) return uploadResult
+
   // Begin synchronous processing immediately after upload.
   // Processing failures do not roll back the persisted document; the user can retry from the review screen.
-  await processDocument(data.id)
+  await processDocument(uploadResult.id)
 
-  return { success: true, id: data.id }
+  return { success: true, id: uploadResult.id }
 }
 
 export async function processDocument(documentId: string): Promise<ActionResult> {
