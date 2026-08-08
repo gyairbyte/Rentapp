@@ -61,3 +61,10 @@ create policy "Users can update own documents"
 
 -- Ensure the authenticated role can access the table through RLS.
 grant select, insert, update, delete on public.documents to authenticated;
+
+-- Re-apply schema usage and table grants so any tables created after 002_core_mvp.sql
+-- (e.g. recurring_rules, document_processing_runs, tasks, repairs) are reachable by
+-- the authenticated role used by the Next.js server client.
+grant usage on schema public to authenticated, anon;
+grant select, insert, update, delete on all tables in schema public to authenticated, anon;
+grant select, usage on all sequences in schema public to authenticated, anon;
