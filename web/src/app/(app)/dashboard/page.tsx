@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { getDashboardData } from '@/lib/actions/dashboard'
 import { labelFor } from '@/lib/utils'
-import { OBLIGATION_STATUSES } from '@/lib/constants'
+import { OBLIGATION_STATUSES, REPAIR_STATUSES, REPAIR_PRIORITIES } from '@/lib/constants'
 import { formatMoney, formatDueDate, getBillHref } from '@/lib/bills'
 
 export const dynamic = 'force-dynamic'
@@ -132,6 +132,37 @@ export default async function DashboardPage() {
       </section>
 
       <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Repairs needing attention</h2>
+          <Link href="/repairs" className="text-sm underline">
+            View all
+          </Link>
+        </div>
+        {data.activeRepairs.length === 0 ? (
+          <p className="text-foreground/70">No active repairs.</p>
+        ) : (
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {data.activeRepairs.slice(0, 6).map((repair) => (
+              <li key={repair.id}>
+                <Link
+                  href={`/repairs/${repair.id}`}
+                  className="block rounded-lg border p-3 hover:border-foreground/50 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-medium">{repair.title}</span>
+                    <RepairPriorityBadge priority={repair.priority} />
+                  </div>
+                  <p className="text-sm text-foreground/70 mt-1">
+                    {labelFor(repair.status, REPAIR_STATUSES)} · {repair.reported_date}
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section>
         <h2 className="text-lg font-semibold mb-3">Properties</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.properties.map((p) => (
@@ -146,6 +177,13 @@ export default async function DashboardPage() {
               </div>
               <div className="text-sm text-foreground/70">
                 Outstanding: {formatMoney(p.totalOutstandingCents)} · {p.openObligations} open obligations
+                {p.activeRepairCount > 0 && (
+                  <span className={p.urgentRepairCount > 0 ? 'text-red-600 font-medium' : ''}>
+                    {' · '}
+                    {p.activeRepairCount} active repair{p.activeRepairCount === 1 ? '' : 's'}
+                    {p.urgentRepairCount > 0 && ` (${p.urgentRepairCount} urgent)`}
+                  </span>
+                )}
               </div>
             </Link>
           ))}
@@ -216,6 +254,19 @@ function AttentionCard({
         </ul>
       )}
     </div>
+  )
+}
+
+function RepairPriorityBadge({ priority }: { priority: string }) {
+  const urgent = priority === 'urgent'
+  return (
+    <span
+      className={`inline-block rounded-full px-2 py-0.5 text-xs border capitalize ${
+        urgent ? 'bg-red-50 text-red-600 border-red-200' : ''
+      }`}
+    >
+      {labelFor(priority, REPAIR_PRIORITIES)}
+    </span>
   )
 }
 

@@ -6,7 +6,10 @@ import { getAccountsForProperty } from '@/lib/actions/account'
 import { getRecurringRulesForProperty } from '@/lib/actions/recurring'
 import { getDocumentsForProperty } from '@/lib/actions/documents'
 import { getPartiesForProperty } from '@/lib/actions/party'
+import { getRepairsForProperty } from '@/lib/actions/repairs'
 import { ArchivePropertyButton } from '@/components/property/archive-property-button'
+import { labelFor } from '@/lib/utils'
+import { REPAIR_STATUSES, REPAIR_PRIORITIES } from '@/lib/constants'
 import { toISODate } from '@/lib/actions/dates'
 import { formatMoney, buildPropertySummary, toMoneyCents } from '@/lib/bills'
 
@@ -17,13 +20,17 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   const property = await getProperty(id)
   if (!property) notFound()
 
-  const [obligations, accounts, recurring, documents, parties] = await Promise.all([
+  const [obligations, accounts, recurring, documents, parties, repairs] = await Promise.all([
     getObligationsForProperty(id),
     getAccountsForProperty(id),
     getRecurringRulesForProperty(id),
     getDocumentsForProperty(id),
     getPartiesForProperty(id),
+    getRepairsForProperty(id, { includeResolved: true }),
   ])
+
+  const activeRepairs = repairs.filter((r) => r.status !== 'closed')
+  const closedRepairs = repairs.filter((r) => r.status === 'closed')
 
   const today = toISODate(new Date())
 
@@ -63,8 +70,14 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         </div>
         <div className="flex gap-2">
           <Link
-            href={`/documents/capture?propertyId=${property.id}`}
+            href={`/repairs/new?propertyId=${property.id}`}
             className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90"
+          >
+            Add repair
+          </Link>
+          <Link
+            href={`/documents/capture?propertyId=${property.id}`}
+            className="rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:bg-foreground/10"
           >
             Scan bill
           </Link>
@@ -237,9 +250,59 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold mb-2">Repairs</h2>
-        <p className="text-foreground/70">Repair tracking will be added in a future ticket.</p>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">
+            Active repairs
+            {activeRepairs.some((r) => r.priority === 'urgent') && (
+              <span className="ml-2 inline-block rounded-full bg-red-50 text-red-600 px-2 py-0.5 text-xs border border-red-200">
+                urgent
+              </span>
+            )}
+          </h2>
+          <Link href={`/repairs/new?propertyId=${property.id}`} className="text-sm underline">
+            Add repair
+          </Link>
+        </div>
+        {activeRepairs.length === 0 ? (
+          <p className="text-foreground/70">No active repairs.</p>
+        ) : (
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {activeRepairs.map((repair) => (
+              <li key={repair.id} className="rounded-lg border p-3">
+                <Link href={`/repairs/${repair.id}`} className="font-medium hover:underline">
+                  {repair.title}
+                </Link>
+                <p className="text-sm text-foreground/70">
+                  {labelFor(repair.status, REPAIR_STATUSES)} ·{' '}
+                  <span className={repair.priority === 'urgent' ? 'font-semibold text-red-600' : ''}>
+                    {labelFor(repair.priority, REPAIR_PRIORITIES)}
+                  </span>
+                  {repair.scheduled_date && ` · scheduled ${repair.scheduled_date}`}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
+
+      {closedRepairs.length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold mb-2">Repair history</h2>
+          <ul className="grid gap-2 sm:grid-cols-2 opacity-70">
+            {closedRepairs.map((repair) => (
+              <li key={repair.id} className="rounded-lg border p-3">
+                <Link href={`/repairs/${repair.id}`} className="font-medium hover:underline">
+                  {repair.title}
+                </Link>
+                <p className="text-sm text-foreground/70">
+                  {labelFor(repair.status, REPAIR_STATUSES)}
+                  {repair.completed_date && ` · completed ${repair.completed_date}`}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   )
 }
