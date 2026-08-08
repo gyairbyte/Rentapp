@@ -14,8 +14,8 @@ export default async function DocumentsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Documents</h1>
-        <Link href="/documents/new" className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90">
-          Upload
+        <Link href="/documents/capture" className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90">
+          Scan bill
         </Link>
       </div>
       {documents.length === 0 ? (
