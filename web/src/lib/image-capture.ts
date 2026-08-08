@@ -32,79 +32,100 @@ export function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = reject
-    img.src = src
-  })
-}
-
-function normalizeOrientation(
-  canvas: HTMLCanvasElement,
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  orientation: number,
-): void {
-  const width = img.naturalWidth
-  const height = img.naturalHeight
-
-  const rotated = orientation > 4 && orientation < 9
-  canvas.width = rotated ? height : width
-  canvas.height = rotated ? width : height
-
-  // reset transform before applying
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-
-  switch (orientation) {
-    case 1:
-      ctx.drawImage(img, 0, 0, width, height, 0, 0, width, height)
-      break
-    case 2:
-      ctx.translate(width, 0)
-      ctx.scale(-1, 1)
-      ctx.drawImage(img, 0, 0)
-      break
-    case 3:
-      ctx.translate(width, height)
-      ctx.rotate(Math.PI)
-      ctx.drawImage(img, 0, 0)
-      break
-    case 4:
-      ctx.translate(0, height)
-      ctx.scale(1, -1)
-      ctx.drawImage(img, 0, 0)
-      break
-    case 5:
-      ctx.translate(0, 0)
-      ctx.transform(0, 1, 1, 0, 0, 0)
-      ctx.drawImage(img, 0, 0)
-      break
-    case 6:
-      ctx.translate(0, 0)
-      ctx.transform(0, 1, -1, 0, height, 0)
-      ctx.drawImage(img, 0, 0)
-      break
-    case 7:
-      ctx.translate(0, 0)
-      ctx.transform(0, -1, -1, 0, height, width)
-      ctx.drawImage(img, 0, 0)
-      break
-    case 8:
-      ctx.translate(0, 0)
-      ctx.transform(0, -1, 1, 0, 0, width)
-      ctx.drawImage(img, 0, 0)
-      break
-    default:
-      ctx.drawImage(img, 0, 0)
+function revokeImageUrl(url: string | undefined) {
+  if (url && typeof URL !== 'undefined' && URL.revokeObjectURL) {
+    URL.revokeObjectURL(url)
   }
 }
 
-function scaleDimensions(width: number, height: number, maxDimension: number): { width: number; height: number } {
-  if (width <= maxDimension && height <= maxDimension) return { width, height }
-  const ratio = Math.min(maxDimension / width, maxDimension / height)
-  return { width: Math.round(width * ratio), height: Math.round(height * ratio) }
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    let url: string | undefined
+
+    const cleanup = () => {
+      img.onload = null
+      img.onerror = null
+      revokeImageUrl(url)
+    }
+
+    img.onload = () => {
+      cleanup()
+      resolve(img)
+    }
+    img.onerror = () => {
+      cleanup()
+      reject(new Error('Could not load image'))
+    }
+
+    if (typeof URL !== 'undefined' && URL.createObjectURL) {
+      url = URL.createObjectURL(file)
+      img.src = url
+    } else {
+      // Fallback for environments without Blob URLs (tests / older runtimes).
+      readFileAsDataUrl(file)
+        .then((dataUrl) => {
+          url = dataUrl
+          img.src = dataUrl
+        })
+        .catch(reject)
+    }
+  })
+}
+
+export function getImageTargetDimensions(
+  naturalWidth: number,
+  naturalHeight: number,
+  orientation: number,
+  maxDimension: number,
+): { width: number; height: number; rotated: boolean } {
+  const rotated = orientation > 4 && orientation < 9
+  const baseWidth = rotated ? naturalHeight : naturalWidth
+  const baseHeight = rotated ? naturalWidth : naturalHeight
+
+  if (baseWidth <= maxDimension && baseHeight <= maxDimension) {
+    return { width: baseWidth, height: baseHeight, rotated }
+  }
+
+  const ratio = Math.min(maxDimension / baseWidth, maxDimension / baseHeight)
+  return {
+    width: Math.round(baseWidth * ratio),
+    height: Math.round(baseHeight * ratio),
+    rotated,
+  }
+}
+
+export function getOrientationMatrix(
+  orientation: number,
+  srcWidth: number,
+  srcHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+): [number, number, number, number, number, number] {
+  const sx = targetWidth / srcWidth
+  const sy = targetHeight / srcHeight
+  const sxR = targetWidth / srcHeight
+  const syR = targetHeight / srcWidth
+
+  switch (orientation) {
+    case 2:
+      return [-sx, 0, 0, sy, targetWidth, 0]
+    case 3:
+      return [-sx, 0, 0, -sy, targetWidth, targetHeight]
+    case 4:
+      return [sx, 0, 0, -sy, 0, targetHeight]
+    case 5:
+      return [0, syR, sxR, 0, 0, 0]
+    case 6:
+      return [0, syR, -sxR, 0, targetWidth, 0]
+    case 7:
+      return [0, -syR, -sxR, 0, targetWidth, targetHeight]
+    case 8:
+      return [0, -syR, sxR, 0, 0, targetHeight]
+    case 1:
+    default:
+      return [sx, 0, 0, sy, 0, 0]
+  }
 }
 
 export async function prepareImageFile(file: File): Promise<PreparedFile> {
@@ -124,35 +145,33 @@ export async function prepareImageFile(file: File): Promise<PreparedFile> {
     throw new Error('Unsupported file type. Use JPEG, PNG, WebP, or PDF.')
   }
 
-  const orientation = await exifr.orientation(file).catch(() => 1) ?? 1
-  const dataUrl = await readFileAsDataUrl(file)
-  const img = await loadImage(dataUrl)
+  const orientation = (await exifr.orientation(file).catch(() => 1)) ?? 1
+  const img = await loadImage(file)
 
-  const rotated = orientation > 4 && orientation < 9
-  const rawWidth = rotated ? img.naturalHeight : img.naturalWidth
-  const rawHeight = rotated ? img.naturalWidth : img.naturalHeight
+  const { width: targetWidth, height: targetHeight, rotated } = getImageTargetDimensions(
+    img.naturalWidth,
+    img.naturalHeight,
+    orientation,
+    MAX_IMAGE_DIMENSION,
+  )
 
-  const { width, height } = scaleDimensions(rawWidth, rawHeight, MAX_IMAGE_DIMENSION)
-  const resized = width !== rawWidth || height !== rawHeight
+  const resized = rotated
+    ? img.naturalHeight > targetWidth || img.naturalWidth > targetHeight
+    : img.naturalWidth > targetWidth || img.naturalHeight > targetHeight
 
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Could not prepare image for upload')
 
-  canvas.width = width
-  canvas.height = height
+  canvas.width = targetWidth
+  canvas.height = targetHeight
 
-  // Normalize orientation and draw into the (possibly resized) canvas.
-  // For orientations that swap axes, we first decode into a full-resolution
-  // oriented canvas, then scale down if needed.
-  const orientedCanvas = document.createElement('canvas')
-  const orientedCtx = orientedCanvas.getContext('2d')
-  if (!orientedCtx) throw new Error('Could not prepare image for upload')
-
-  normalizeOrientation(orientedCanvas, orientedCtx, img, orientation)
-
-  // Draw the oriented image scaled into the target canvas.
-  ctx.drawImage(orientedCanvas, 0, 0, orientedCanvas.width, orientedCanvas.height, 0, 0, width, height)
+  // Single-pass orientation-and-scale draw; no full-resolution intermediate canvas.
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  const matrix = getOrientationMatrix(orientation, img.naturalWidth, img.naturalHeight, targetWidth, targetHeight)
+  ctx.setTransform(...matrix)
+  ctx.drawImage(img, 0, 0)
 
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(

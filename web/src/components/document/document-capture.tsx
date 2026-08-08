@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { prepareImageFile, readFileAsDataUrl } from '@/lib/image-capture'
 import type { ActionResult } from '@/lib/actions/documents'
 
-type Step = 'select' | 'preview' | 'preparing' | 'uploading' | 'analyzing' | 'error'
+type Step = 'select' | 'preview' | 'preparing' | 'uploading' | 'analyzing' | 'duplicate' | 'error'
 
 type DocumentCaptureProps = {
   property?: { id: string; nickname: string } | null
@@ -29,6 +29,7 @@ export function DocumentCapture({ property, uploadDocument, processDocument }: D
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [processingMessage, setProcessingMessage] = useState<string | null>(null)
+  const [duplicateDocumentId, setDuplicateDocumentId] = useState<string | null>(null)
 
   const reset = useCallback(() => {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -36,6 +37,7 @@ export function DocumentCapture({ property, uploadDocument, processDocument }: D
     setSelectedFile(null)
     setError(null)
     setProcessingMessage(null)
+    setDuplicateDocumentId(null)
     setStep('select')
     if (cameraInputRef.current) cameraInputRef.current.value = ''
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -97,7 +99,8 @@ export function DocumentCapture({ property, uploadDocument, processDocument }: D
     }
 
     if (uploadResult.duplicateDocumentId) {
-      router.push(`/documents/${uploadResult.duplicateDocumentId}/review`)
+      setDuplicateDocumentId(uploadResult.duplicateDocumentId)
+      setStep('duplicate')
       return
     }
 
@@ -202,6 +205,29 @@ export function DocumentCapture({ property, uploadDocument, processDocument }: D
           <p className="font-medium">{step === 'uploading' ? 'Uploading…' : 'Analyzing bill…'}</p>
           {processingMessage && <p className="text-sm text-foreground/70">{processingMessage}</p>}
           <p className="text-xs text-foreground/60">Do not close this page.</p>
+        </div>
+      )}
+
+      {step === 'duplicate' && duplicateDocumentId && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-medium">This document has already been uploaded</p>
+          <p className="text-amber-800/80">No new document was created.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => router.push(`/documents/${duplicateDocumentId}/review`)}
+              className="rounded-md bg-amber-900 text-amber-50 px-3 py-1.5 text-sm font-medium hover:bg-amber-800"
+            >
+              Review existing document
+            </button>
+            <button
+              type="button"
+              onClick={reset}
+              className="rounded-md border border-amber-200 px-3 py-1.5 text-sm font-medium hover:bg-amber-100"
+            >
+              Take another photo
+            </button>
+          </div>
         </div>
       )}
 

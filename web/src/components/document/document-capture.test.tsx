@@ -97,7 +97,7 @@ describe('DocumentCapture', () => {
     expect(processDocument).toHaveBeenCalledWith('doc-123')
   })
 
-  it('routes to the existing document when a duplicate is detected', async () => {
+  it('shows a duplicate message and lets the user review the existing document', async () => {
     uploadDocument.mockResolvedValue({ success: true, duplicateDocumentId: 'doc-existing' })
 
     render(<DocumentCapture uploadDocument={uploadDocument} processDocument={processDocument} />)
@@ -107,8 +107,12 @@ describe('DocumentCapture', () => {
     await waitFor(() => screen.getByText('Use photo & analyze'))
     fireEvent.click(screen.getByText('Use photo & analyze'))
 
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/documents/doc-existing/review'))
+    await waitFor(() => screen.getByText('This document has already been uploaded'))
     expect(processDocument).not.toHaveBeenCalled()
+    expect(mockPush).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByText('Review existing document'))
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/documents/doc-existing/review'))
   })
 
   it('disables the submit flow while processing and does not double submit', async () => {

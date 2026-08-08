@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto'
 import { createClient } from '@/lib/supabase/client'
 import { documentSchema } from '@/lib/validations/document'
 import { requireUser } from './helpers'
+import { getProperty } from './property'
 import { formatZodErrors } from '@/lib/utils'
 import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, parseExtraction, hashFileBuffer } from '@/lib/document-intelligence'
 import { findDocumentMatch } from '@/lib/document-intelligence/matching'
@@ -202,6 +203,15 @@ export async function uploadDocument(formData: FormData): Promise<ActionResult> 
   }
 
   const user = await requireUser()
+
+  // Explicit server-side ownership check for any property context.
+  if (parsed.data.property_id) {
+    const property = await getProperty(parsed.data.property_id)
+    if (!property) {
+      return { error: 'Property not found or does not belong to you' }
+    }
+  }
+
   const supabase = await createClient()
 
   const file = formData.get('file') as File | null
