@@ -7,8 +7,8 @@ import { getRecurringRulesForProperty } from '@/lib/actions/recurring'
 import { getDocumentsForProperty } from '@/lib/actions/documents'
 import { getPartiesForProperty } from '@/lib/actions/party'
 import { ArchivePropertyButton } from '@/components/property/archive-property-button'
-import { startOfMonth, endOfMonth, toISODate } from '@/lib/actions/dates'
-import { formatMoney, toMoneyCents } from '@/lib/bills'
+import { toISODate } from '@/lib/actions/dates'
+import { formatMoney, buildPropertySummary, toMoneyCents } from '@/lib/bills'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,29 +26,24 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   ])
 
   const today = toISODate(new Date())
-  const monthStart = toISODate(startOfMonth(new Date()))
-  const monthEnd = toISODate(endOfMonth(new Date()))
-  const inMonth = (dueDate: string) => dueDate >= monthStart && dueDate <= monthEnd
 
-  const rentInMonth = obligations.filter((o) => o.category === 'rent' && inMonth(o.due_date))
-  const rentExpectedCents = rentInMonth.reduce((sum, o) => sum + toMoneyCents(o.expected_amount), 0)
-  const rentReceivedCents = rentInMonth.reduce((sum, o) => sum + toMoneyCents(o.paid_amount), 0)
-
-  const payableInMonth = obligations.filter((o) => o.direction === 'payable' && inMonth(o.due_date))
-  const billsDueCents = payableInMonth.reduce(
-    (sum, o) => sum + Math.max(0, toMoneyCents(o.expected_amount) - toMoneyCents(o.paid_amount)),
-    0,
+  const summary = buildPropertySummary(
+    property,
+    obligations,
+    { documents, accounts, parties, payments: [] },
+    today,
   )
-  const billsPaidCents = payableInMonth.reduce((sum, o) => sum + toMoneyCents(o.paid_amount), 0)
 
-  const totalOutstandingCents = obligations.reduce(
-    (sum, o) => sum + Math.max(0, toMoneyCents(o.expected_amount) - toMoneyCents(o.paid_amount)),
-    0,
-  )
-  const openObligations = obligations.filter((o) => o.paid_amount < o.expected_amount).length
-  const upcoming = obligations
-    .filter((o) => o.due_date >= today && o.paid_amount < o.expected_amount)
-    .slice(0, 10)
+  const {
+    rentExpectedCents,
+    rentReceivedCents,
+    rentOutstandingCents,
+    billsDueCents,
+    billsPaidCents,
+    totalOutstandingCents,
+    openObligations,
+    upcoming,
+  } = summary
 
   return (
     <div className="space-y-6">
@@ -88,7 +83,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         </div>
         <div className="rounded-lg border p-4">
           <p className="text-sm text-foreground/70">Rent outstanding</p>
-          <p className="text-xl font-semibold">{formatMoney(rentExpectedCents - rentReceivedCents)}</p>
+          <p className="text-xl font-semibold">{formatMoney(rentOutstandingCents)}</p>
         </div>
         <div className="rounded-lg border p-4">
           <p className="text-sm text-foreground/70">Outstanding</p>
@@ -115,8 +110,8 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
           <p className="text-foreground/70">No upcoming obligations.</p>
         ) : (
           <ul className="space-y-2">
-            {upcoming.map((o) => {
-              const href = o.source_document_id ? `/bills/${o.source_document_id}` : `/bills/${o.id}`
+            {upcoming.map((item) => {
+              const { obligation: o, href } = item
               return (
                 <li key={o.id} className="rounded-lg border p-3 flex items-center justify-between">
                   <div>
@@ -124,7 +119,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
                       {o.description || o.category.replace(/_/g, ' ')}
                     </Link>
                     <p className="text-sm text-foreground/70">
-                      {o.due_date} · {formatMoney(Math.max(0, toMoneyCents(o.expected_amount) - toMoneyCents(o.paid_amount)))} remaining
+                      {o.due_date} · {formatMoney(o.remaining_cents)} remaining
                     </p>
                   </div>
                   <Link href={href} className="text-sm underline">

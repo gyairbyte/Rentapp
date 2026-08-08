@@ -148,7 +148,7 @@ export async function getDashboardData() {
       (sum, o) => sum + remainingCents(o.expected_amount, o.paid_amount, o.status),
       0,
     )
-    const open = propertyObligations.filter((o) => o.paid_amount < o.expected_amount).length
+    const open = propertyObligations.filter((o) => remainingCents(o.expected_amount, o.paid_amount, o.status) > 0).length
 
     return {
       ...property,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildBillsFromObligations, filterBills, getBillHref, toMoneyCents, deriveObligationStatus } from './bills'
+import { buildBillsFromObligations, buildPropertySummary, filterBills, getBillHref, toMoneyCents, deriveObligationStatus } from './bills'
 import type { Obligation, Document, Property, Account, Party, Payment } from './types'
 
 const today = '2026-08-07'
@@ -246,5 +246,90 @@ describe('getBillHref', () => {
 
   it('falls back to obligation id for standalone bills', () => {
     expect(getBillHref({ source_document_id: null, id: 'obligation-1' })).toBe('/bills/obligation-1')
+  })
+})
+
+describe('deriveObligationStatus for disputed obligations', () => {
+  it('preserves disputed state for a past-due obligation and includes it in remaining balance', () => {
+    const obligation = makeObligation({ id: 'o1', status: 'disputed', expected_amount: 100, paid_amount: 0, due_date: '2026-08-01' })
+
+    expect(deriveObligationStatus(obligation, today)).toBe('disputed')
+
+    const bills = buildBillsFromObligations([obligation], baseDeps, today)
+
+    expect(bills[0].status).toBe('disputed')
+    expect(bills[0].remaining_cents).toBe(10000)
+    expect(bills[0].overdue_cents).toBe(10000)
+  })
+
+  it('preserves disputed state for a partially paid obligation', () => {
+    const obligation = makeObligation({ id: 'o1', status: 'disputed', expected_amount: 100, paid_amount: 50, due_date: '2026-09-01' })
+
+    expect(deriveObligationStatus(obligation, today)).toBe('disputed')
+
+    const bills = buildBillsFromObligations([obligation], baseDeps, today)
+
+    expect(bills[0].status).toBe('disputed')
+    expect(bills[0].remaining_cents).toBe(5000)
+  })
+
+  it('marks a disputed group as disputed when at least one installment is disputed', () => {
+    const obligations = [
+      makeObligation({ id: 'o1', source_document_id: 'doc-1', source_item_key: 'i1', expected_amount: 100, paid_amount: 0, due_date: '2026-09-01', status: 'upcoming' }),
+      makeObligation({ id: 'o2', source_document_id: 'doc-1', source_item_key: 'i2', expected_amount: 100, paid_amount: 0, due_date: '2026-10-01', status: 'disputed' }),
+    ]
+
+    const bills = buildBillsFromObligations(obligations, baseDeps, today)
+
+    expect(bills[0].status).toBe('disputed')
+    expect(bills[0].remaining_cents).toBe(20000)
+  })
+})
+
+describe('buildPropertySummary', () => {
+  it('excludes canceled and waived obligations from rent expected, bills due, and outstanding totals', () => {
+    const obligations = [
+      makeObligation({ id: 'o1', expected_amount: 1000, paid_amount: 0, due_date: '2026-08-15', category: 'rent', status: 'upcoming' }),
+      makeObligation({ id: 'o2', expected_amount: 500, paid_amount: 0, due_date: '2026-08-20', category: 'rent', status: 'canceled' }),
+      makeObligation({ id: 'o3', expected_amount: 300, paid_amount: 0, due_date: '2026-08-25', category: 'water', status: 'waived' }),
+      makeObligation({ id: 'o4', expected_amount: 200, paid_amount: 0, due_date: '2026-08-28', category: 'trash', status: 'upcoming' }),
+    ]
+
+    const summary = buildPropertySummary(property, obligations, baseDeps, today)
+
+    expect(summary.rentExpectedCents).toBe(100000)
+    expect(summary.billsDueCents).toBe(120000) // rent 1000 + trash 200
+    expect(summary.totalOutstandingCents).toBe(120000)
+    expect(summary.openObligations).toBe(2)
+  })
+
+  it('matches Dashboard/Bills outstanding totals for a property with mixed statuses', () => {
+    const obligations = [
+      makeObligation({ id: 'o1', expected_amount: 439.13, paid_amount: 0, due_date: '2026-08-03', status: 'upcoming' }),
+      makeObligation({ id: 'o2', expected_amount: 439.13, paid_amount: 439.13, due_date: '2026-09-14', status: 'paid' }),
+      makeObligation({ id: 'o3', expected_amount: 439.13, paid_amount: 0, due_date: '2026-10-31', status: 'disputed' }),
+      makeObligation({ id: 'o4', expected_amount: 439.12, paid_amount: 0, due_date: '2026-12-07', status: 'waived' }),
+    ]
+
+    const summary = buildPropertySummary(property, obligations, baseDeps, today)
+
+    expect(summary.totalOutstandingCents).toBe(87826) // 43913 + 43913
+    expect(summary.openObligations).toBe(2)
+    expect(summary.billsDueCents).toBe(43913) // overdue August installment counts as due this month
+  })
+
+  it('lists only unresolved future obligations as upcoming', () => {
+    const obligations = [
+      makeObligation({ id: 'o1', expected_amount: 100, paid_amount: 0, due_date: '2026-08-01', status: 'upcoming' }),
+      makeObligation({ id: 'o2', expected_amount: 200, paid_amount: 0, due_date: '2026-08-31', status: 'upcoming' }),
+      makeObligation({ id: 'o3', expected_amount: 300, paid_amount: 300, due_date: '2026-08-31', status: 'paid' }),
+      makeObligation({ id: 'o4', expected_amount: 400, paid_amount: 0, due_date: '2026-09-15', status: 'upcoming' }),
+    ]
+
+    const summary = buildPropertySummary(property, obligations, baseDeps, today)
+
+    expect(summary.upcoming).toHaveLength(2)
+    expect(summary.upcoming[0].obligation.id).toBe('o2')
+    expect(summary.upcoming[1].obligation.id).toBe('o4')
   })
 })

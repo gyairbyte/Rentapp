@@ -71,7 +71,7 @@ export function calculateRemainingCents(expected: number, paid: number): number 
   return Math.max(0, toMoneyCents(expected) - toMoneyCents(paid))
 }
 
-function dueDateString(value: string | Date | null | undefined): string {
+export function dueDateString(value: string | Date | null | undefined): string {
   if (!value) return ''
   if (typeof value === 'string') return value
   return value.toISOString().slice(0, 10)
@@ -88,9 +88,12 @@ export function deriveObligationStatus(
     return obligation.status
   }
 
+  if (obligation.status === 'disputed') {
+    return 'disputed'
+  }
+
   if (paidCents >= expectedCents) return 'paid'
   if (paidCents > 0) return 'partially_paid'
-  if (obligation.status === 'disputed') return 'disputed'
 
   const dueDate = dueDateString(obligation.due_date)
   if (dueDate < today) return 'overdue'
@@ -340,6 +343,112 @@ export function filterBills(bills: Bill[], filter: string | undefined | null): B
 
 export function getBillHref(bill: { source_document_id: string | null; id: string }): string {
   return `/bills/${bill.source_document_id ?? bill.id}`
+}
+
+export type PropertySummary = {
+  rentExpectedCents: number
+  rentReceivedCents: number
+  rentOutstandingCents: number
+  billsDueCents: number
+  billsPaidCents: number
+  totalOutstandingCents: number
+  openObligations: number
+  upcoming: { obligation: BillObligation; href: string }[]
+}
+
+export function buildPropertySummary(
+  property: Property,
+  obligations: Obligation[],
+  deps: {
+    documents: Document[]
+    accounts: Account[]
+    parties: Party[]
+    payments: Payment[]
+  },
+  today: string,
+): PropertySummary {
+  const bills = buildBillsFromObligations(
+    obligations,
+    {
+      documents: deps.documents,
+      properties: [property],
+      accounts: deps.accounts,
+      parties: deps.parties,
+      payments: deps.payments,
+    },
+    today,
+  )
+
+  const monthStart = toISODate(startOfMonth(new Date(`${today}T00:00:00Z`)))
+  const monthEnd = toISODate(endOfMonth(new Date(`${today}T00:00:00Z`)))
+  const inMonth = (dueDate: string) => dueDate >= monthStart && dueDate <= monthEnd
+
+  const isResolved = (o: BillObligation) => ['canceled', 'waived'].includes(o.status)
+
+  const rentExpectedCents = bills.reduce(
+    (sum, bill) =>
+      sum +
+      bill.obligations
+        .filter((o) => o.category === 'rent' && !isResolved(o) && inMonth(dueDateString(o.due_date)))
+        .reduce((s, o) => s + toMoneyCents(o.expected_amount), 0),
+    0,
+  )
+
+  const rentReceivedCents = bills.reduce(
+    (sum, bill) =>
+      sum +
+      bill.obligations
+        .filter((o) => o.category === 'rent' && !isResolved(o) && inMonth(dueDateString(o.due_date)))
+        .reduce((s, o) => s + toMoneyCents(o.paid_amount), 0),
+    0,
+  )
+
+  const billsDueCents = bills.reduce(
+    (sum, bill) =>
+      sum +
+      bill.obligations
+        .filter((o) => o.direction === 'payable' && inMonth(dueDateString(o.due_date)))
+        .reduce((s, o) => s + o.remaining_cents, 0),
+    0,
+  )
+
+  const billsPaidCents = bills.reduce(
+    (sum, bill) =>
+      sum +
+      bill.obligations
+        .filter((o) => o.direction === 'payable' && !isResolved(o) && inMonth(dueDateString(o.due_date)))
+        .reduce((s, o) => s + toMoneyCents(o.paid_amount), 0),
+    0,
+  )
+
+  const totalOutstandingCents = bills.reduce((sum, bill) => sum + bill.remaining_cents, 0)
+
+  const openObligations = bills.reduce(
+    (sum, bill) => sum + bill.obligations.filter((o) => o.remaining_cents > 0).length,
+    0,
+  )
+
+  const upcoming = bills
+    .flatMap((bill) =>
+      bill.obligations.map((o) => ({
+        obligation: o,
+        href: getBillHref(bill),
+      })),
+    )
+    .filter((x) => x.obligation.remaining_cents > 0 && dueDateString(x.obligation.due_date) >= today)
+    .sort((a, b) => dueDateString(a.obligation.due_date).localeCompare(dueDateString(b.obligation.due_date)))
+    .slice(0, 10)
+
+  return {
+    rentExpectedCents,
+    rentReceivedCents,
+    rentOutstandingCents: rentExpectedCents - rentReceivedCents,
+    billsDueCents,
+    billsPaidCents,
+    totalOutstandingCents,
+    openObligations,
+    upcoming,
+  }
 }
 
 export function formatDueDate(date: string | null | undefined): string {
