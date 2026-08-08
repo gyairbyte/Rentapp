@@ -3,9 +3,13 @@ import { optionalDate, optionalString, optionalUuid } from './helpers'
 
 export const documentSchema = z.object({
   property_id: optionalUuid(),
+  account_id: optionalUuid(),
+  party_id: optionalUuid(),
+  obligation_id: optionalUuid(),
   document_type: optionalString(),
   issuer: optionalString(),
   document_date: optionalDate(),
+  notes: optionalString(),
   file: z.any().optional(),
 })
 
