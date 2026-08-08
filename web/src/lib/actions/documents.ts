@@ -93,7 +93,7 @@ async function validateDocumentOwnership(
       .single()
       .returns<Party>()
     if (error || !row) return { property, account, party: null, obligation: null, error: 'Party not found' }
-    if (property && row.property_id !== property.id) {
+    if (property && row.property_id !== null && row.property_id !== property.id) {
       return { property, account, party: null, obligation: null, error: 'Party does not belong to the selected property' }
     }
     party = row

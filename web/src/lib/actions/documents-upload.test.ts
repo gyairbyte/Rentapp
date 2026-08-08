@@ -260,6 +260,39 @@ describe('uploadDocument', () => {
     expect((result as { error: string }).error).toContain('does not belong to the selected property')
   })
 
+  it('rejects a cross-user party_id', async () => {
+    const client = makeClient({ party: null })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await uploadDocument(makeUploadForm({ partyId: PT1 }))
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('Party not found')
+    expect(client.storage.from).not.toHaveBeenCalled()
+  })
+
+  it('allows a global party_id (property_id = null) with a selected property', async () => {
+    const client = makeClient({ party: { id: PT1, property_id: null } })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await uploadDocument(makeUploadForm({ propertyId: P1, partyId: PT1 }))
+
+    expect(result).toEqual({ success: true, id: 'doc-new' })
+  })
+
+  it('rejects a party_id assigned to a different property', async () => {
+    const otherProperty = '550e8400-e29b-41d4-a716-446655440007'
+    const otherParty = '550e8400-e29b-41d4-a716-446655440008'
+    const client = makeClient({ party: { id: otherParty, property_id: otherProperty } })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await uploadDocument(makeUploadForm({ propertyId: P1, partyId: otherParty }))
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('does not belong to the selected property')
+    expect(client.storage.from).not.toHaveBeenCalled()
+  })
+
   it('cleans up the storage object when the database insert fails', async () => {
     const client = makeClient({ existingByHash: [], insertError: { message: 'Insert failed' } })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)

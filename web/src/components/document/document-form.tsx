@@ -55,6 +55,7 @@ export function DocumentForm({
   const [propertyId, setPropertyId] = useState(doc?.property_id ?? defaultPropertyId ?? '')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
+  const [duplicateInfo, setDuplicateInfo] = useState<{ id: string } | null>(null)
 
   const filteredAccounts = useMemo(() => {
     if (!propertyId) return accounts
@@ -73,7 +74,11 @@ export function DocumentForm({
 
   const { formAction, error, fieldErrors, isPending } = useFormAction<CreateDocumentSuccess>(action, {
     onSuccess: (res) => {
-      const id = res.id ?? res.duplicateDocumentId
+      if (res.duplicateDocumentId) {
+        setDuplicateInfo({ id: res.duplicateDocumentId })
+        return
+      }
+      const id = res.id
       if (id) {
         router.push(`/documents/${id}`)
       } else {
@@ -90,6 +95,7 @@ export function DocumentForm({
   }
 
   async function handleSubmit(formData: FormData) {
+    setDuplicateInfo(null)
     if (!doc) {
       const validation = validateFile(selectedFile)
       if (validation) {
@@ -202,10 +208,25 @@ export function DocumentForm({
         </div>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {duplicateInfo && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 p-4 text-sm text-amber-900">
+          <p className="font-medium">This file has already been uploaded.</p>
+          <p className="text-amber-800/80">No new document was created.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => router.push(`/documents/${duplicateInfo.id}`)}
+              className="rounded-md bg-amber-900 text-amber-50 px-3 py-1.5 text-sm font-medium hover:bg-amber-800"
+            >
+              View existing document
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={isPending || (!doc && (fileError !== null || !selectedFile))}
+          disabled={isPending || (!doc && (fileError !== null || !selectedFile)) || Boolean(duplicateInfo)}
           className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {isPending ? 'Saving…' : doc ? 'Update document' : 'Upload document'}
