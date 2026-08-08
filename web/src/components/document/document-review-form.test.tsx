@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { DocumentReviewForm } from './document-review-form'
 import { emptyExtraction, parseExtractionOrEmpty } from '@/lib/document-intelligence/extraction-schema'
+import { saveCorrectedInstallmentSchedule } from '@/lib/actions/documents'
 import type { Document, DocumentExtraction, DocumentMatch, PaymentOption } from '@/lib/types'
 
 const mockPush = vi.fn()
@@ -17,6 +18,7 @@ vi.mock('@/lib/actions/documents', () => ({
   confirmDocument: vi.fn(),
   retryProcessDocument: vi.fn(),
   archiveDocument: vi.fn(),
+  saveCorrectedInstallmentSchedule: vi.fn(),
 }))
 
 function makeDocument(overrides: Partial<Document> = {}): Document {
@@ -161,6 +163,7 @@ const parties: { id: string; property_id: string | null; name: string; party_typ
 describe('DocumentReviewForm payment selection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(saveCorrectedInstallmentSchedule).mockResolvedValue({ success: true })
   })
 
   afterEach(() => {
@@ -377,7 +380,7 @@ describe('DocumentReviewForm payment selection', () => {
       />
     )
 
-    expect(container.textContent).toContain('Four installments')
+    expect(container.textContent).toContain('Pay in 4 installments')
     const option = extraction.proposed_actions[0].payment_options[0]
     expect(option.late_payment_terms).toEqual([])
     expect(option.installments[0].late_payment_terms).toEqual([])
@@ -388,5 +391,173 @@ describe('DocumentReviewForm payment selection', () => {
 
     const hiddenInput = container.querySelector('input[name="selected_payment_option_index"]') as HTMLInputElement
     expect(hiddenInput.value).toBe('0')
+  })
+
+  it('disables confirm and shows totals/difference for an invalid installment schedule', async () => {
+    const unbalancedInstallments = [
+      { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-12-07', description: 'Installment 4 of 4', late_payment_terms: [] },
+    ]
+    const extraction = makeExtraction([
+      paymentOption({ option_type: 'installment_plan', amount: 1756.51, due_date: '2026-10-31', description: 'Four installments', installments: unbalancedInstallments }),
+    ])
+
+    const { container } = render(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={extraction}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+    fireEvent.click(radios[0])
+
+    await waitFor(() => expect(container.textContent).toContain('Schedule cannot be confirmed'))
+    expect(container.textContent).toContain('Plan total $1,756.51')
+    expect(container.textContent).toContain('Installment total $1,756.52')
+    expect(container.textContent).toContain('+$0.01')
+
+    const confirmButton = screen.getByRole('button', { name: /Confirm/i }) as HTMLButtonElement
+    expect(confirmButton.disabled).toBe(true)
+  })
+
+  it('recalculates totals while editing and saves a corrected schedule', async () => {
+    const extraction = makeExtraction([
+      paymentOption({
+        option_type: 'installment_plan',
+        amount: 1756.51,
+        due_date: '2026-10-31',
+        description: 'Four installments',
+        installments: [
+          { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4', late_payment_terms: [] },
+          { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4', late_payment_terms: [] },
+          { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4', late_payment_terms: [] },
+          { amount: 439.13, due_date: '2026-12-07', description: 'Installment 4 of 4', late_payment_terms: [] },
+        ],
+      }),
+    ])
+
+    const { container } = render(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={extraction}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+    fireEvent.click(radios[0])
+
+    const editButton = await waitFor(() => screen.getByRole('button', { name: /Edit schedule/i }))
+    fireEvent.click(editButton)
+
+    const amountInputs = screen.getAllByLabelText(/amount/i) as HTMLInputElement[]
+    fireEvent.change(amountInputs[3], { target: { value: '439.12' } })
+
+    await waitFor(() => expect(container.textContent).toContain('Difference: $0.00'))
+
+    fireEvent.click(screen.getByRole('button', { name: /Save corrections/i }))
+
+    await waitFor(() => {
+      expect(saveCorrectedInstallmentSchedule).toHaveBeenCalledWith(
+        'd-1',
+        0,
+        expect.arrayContaining([
+          expect.objectContaining({ amount: '439.12', due_date: '2026-12-07' }),
+        ]),
+      )
+    })
+  })
+
+  it('cancelling an edit does not persist changes', async () => {
+    const extraction = makeExtraction([
+      paymentOption({
+        option_type: 'installment_plan',
+        amount: 1756.51,
+        due_date: '2026-10-31',
+        description: 'Four installments',
+        installments: [
+          { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4', late_payment_terms: [] },
+          { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4', late_payment_terms: [] },
+          { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4', late_payment_terms: [] },
+          { amount: 439.13, due_date: '2026-12-07', description: 'Installment 4 of 4', late_payment_terms: [] },
+        ],
+      }),
+    ])
+
+    const { container } = render(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={extraction}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+    fireEvent.click(radios[0])
+
+    const editButton = await waitFor(() => screen.getByRole('button', { name: /Edit schedule/i }))
+    fireEvent.click(editButton)
+
+    const amountInputs = screen.getAllByLabelText(/amount/i) as HTMLInputElement[]
+    fireEvent.change(amountInputs[3], { target: { value: '439.12' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/i }))
+
+    await waitFor(() => expect(container.textContent).not.toContain('Save corrections'))
+    expect(saveCorrectedInstallmentSchedule).not.toHaveBeenCalled()
+    expect(container.textContent).toMatch(/4\$439\.1312\/7\/2026/)
+  })
+
+  it('displays a 10% late amount for each installment', async () => {
+    const extraction = makeExtraction([
+      paymentOption({
+        option_type: 'installment_plan',
+        amount: 1756.51,
+        due_date: '2026-10-31',
+        description: 'Four installments',
+        installments: [
+          { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4', late_payment_terms: [{ term_type: 'penalty' as const, amount: null, rate: 0.1, effective_date: '2026-08-03', due_date: '2026-08-03', description: '10% penalty after due' }] },
+          { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4', late_payment_terms: [{ term_type: 'penalty' as const, amount: null, rate: 0.1, effective_date: '2026-09-14', due_date: '2026-09-14', description: '10% penalty after due' }] },
+          { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4', late_payment_terms: [{ term_type: 'penalty' as const, amount: null, rate: 0.1, effective_date: '2026-10-31', due_date: '2026-10-31', description: '10% penalty after due' }] },
+          { amount: 439.12, due_date: '2026-12-07', description: 'Installment 4 of 4', late_payment_terms: [{ term_type: 'penalty' as const, amount: null, rate: 0.1, effective_date: '2026-12-07', due_date: '2026-12-07', description: '10% penalty after due' }] },
+        ],
+      }),
+    ])
+
+    const { container } = render(
+      <DocumentReviewForm
+        document={makeDocument()}
+        extraction={extraction}
+        proposedMatch={proposedMatch}
+        properties={properties}
+        accounts={accounts}
+        parties={parties}
+        duplicates={[]}
+      />
+    )
+
+    const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+    fireEvent.click(radios[0])
+
+    await waitFor(() => {
+      expect(container.textContent).toMatch(/10% late[^]*\$483\.03/)
+      expect(container.textContent).toMatch(/10% late[^]*\$483\.04/)
+    })
   })
 })

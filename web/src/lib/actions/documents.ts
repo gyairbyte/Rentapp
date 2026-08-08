@@ -10,7 +10,8 @@ import { getDocumentIntelligenceProvider, parseExtractionOrEmpty, parseExtractio
 import { findDocumentMatch } from '@/lib/document-intelligence/matching'
 import { detectSemanticDuplicates } from '@/lib/document-intelligence/duplicates'
 import { getSelectablePaymentOptions, isSelectablePaymentOption } from '@/lib/payment-options'
-import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert } from '@/lib/types'
+import { isValidDateOnly, toCents, formatCents, validateInstallmentPlan } from '@/lib/payment-validation'
+import type { Document, DocumentUpdate, DocumentProcessingRun, DocumentExtraction, DocumentProcessingRunInsert, PaymentOption, PaymentInstallment } from '@/lib/types'
 
 type ActionResult =
   | { success: true; id?: string; duplicateDocumentId?: string }
@@ -126,7 +127,7 @@ export async function getDocumentWithDetails(id: string) {
   }
 }
 
-async function getDocumentExtraction(documentId: string): Promise<{ document: Document; extraction: DocumentExtraction } | null> {
+async function getDocumentExtraction(documentId: string): Promise<{ document: Document; extraction: DocumentExtraction; run: DocumentProcessingRun | null } | null> {
   const user = await requireUser()
   const supabase = await createClient()
 
@@ -142,18 +143,19 @@ async function getDocumentExtraction(documentId: string): Promise<{ document: Do
 
   const { data: runs } = await supabase
     .from('document_processing_runs')
-    .select('normalized_extraction')
+    .select('*')
     .eq('document_id', documentId)
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(1)
-    .returns<Array<Pick<DocumentProcessingRun, 'normalized_extraction'>>>()
+    .returns<DocumentProcessingRun[]>()
 
-  const rawExtraction = runs?.[0]?.normalized_extraction ?? tryParseRaw(document.raw_ai_extraction)
+  const run = runs?.[0] ?? null
+  const rawExtraction = run?.normalized_extraction ?? tryParseRaw(document.raw_ai_extraction)
   const extraction = parseExtraction(rawExtraction)
   if (!extraction) return null
 
-  return { document, extraction }
+  return { document, extraction, run }
 }
 
 async function findDuplicateCandidates(
@@ -471,13 +473,21 @@ export async function confirmDocument(documentId: string, formData: FormData): P
       return { error: 'A payment option must be selected' }
     }
     const index = Number(selectedPaymentOptionIndexRaw)
-    if (Number.isNaN(index) || index < 0 || index >= paymentOptions.length) {
+    if (!Number.isFinite(index) || !Number.isInteger(index) || index < 0 || index >= paymentOptions.length) {
       return { error: 'Invalid payment option selection' }
     }
     const selected = paymentOptions[index]
     if (!selected || !isSelectablePaymentOption(selected)) {
       return { error: 'Selected payment option is not a valid selectable plan' }
     }
+
+    if (selected.option_type === 'installment_plan') {
+      const validation = validateInstallmentPlan(selected)
+      if (!validation.valid) {
+        return { error: validation.error ?? 'Selected installment plan is not valid' }
+      }
+    }
+
     selectedPaymentOptionIndex = index
     selectedAmount = selected.amount ?? null
     selectedDueDate = selected.due_date ?? null
@@ -526,6 +536,140 @@ export async function confirmDocument(documentId: string, formData: FormData): P
   revalidatePath(`/documents/${documentId}`)
   revalidatePath(`/properties/${propertyId}`)
   revalidatePath('/obligations')
+
+  return { success: true }
+}
+
+export type CorrectedInstallmentInput = {
+  amount: number | string | null | undefined
+  due_date: string | null | undefined
+}
+
+function isValidSelectedOptionIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)
+}
+
+export async function saveCorrectedInstallmentSchedule(
+  documentId: string,
+  selectedOptionIndex: number,
+  correctedInstallments: CorrectedInstallmentInput[],
+): Promise<ActionResult> {
+  const user = await requireUser()
+  const supabase = await createClient()
+
+  const loaded = await getDocumentExtraction(documentId)
+  if (!loaded) return { error: 'Document not found or extraction is invalid' }
+  const { document, extraction, run } = loaded
+
+  if (document.review_status === 'confirmed') {
+    return { error: 'Cannot edit the schedule of a confirmed document' }
+  }
+
+  const obligationActionIndex = extraction.proposed_actions.findIndex((a) => a.type === 'obligation')
+  if (obligationActionIndex === -1) {
+    return { error: 'No obligation action found in extraction' }
+  }
+  const obligationAction = extraction.proposed_actions[obligationActionIndex]
+  const paymentOptions = obligationAction.payment_options
+
+  if (!isValidSelectedOptionIndex(selectedOptionIndex) || selectedOptionIndex < 0 || selectedOptionIndex >= paymentOptions.length) {
+    return { error: 'Invalid payment option selection' }
+  }
+
+  const targetOption = paymentOptions[selectedOptionIndex]
+  if (targetOption.option_type !== 'installment_plan') {
+    return { error: 'Selected payment option is not an installment plan' }
+  }
+
+  const originalInstallments = targetOption.installments ?? []
+  if (correctedInstallments.length !== originalInstallments.length) {
+    return { error: 'Installment count cannot be changed' }
+  }
+
+  const planCents = toCents(targetOption.amount)
+  if (planCents === null || planCents <= 0) {
+    return { error: 'Plan amount is not valid' }
+  }
+
+  let totalCents = 0
+  const updatedInstallments: PaymentInstallment[] = []
+
+  for (let i = 0; i < originalInstallments.length; i++) {
+    const raw = correctedInstallments[i]
+    if (!raw || typeof raw !== 'object') {
+      return { error: `Installment ${i + 1} is invalid` }
+    }
+
+    const amountCents = toCents(raw.amount)
+    if (amountCents === null || amountCents <= 0) {
+      return { error: `Installment ${i + 1} amount must be a positive money value valid to cents` }
+    }
+    if (!isValidDateOnly(raw.due_date)) {
+      return { error: `Installment ${i + 1} due date must be a valid date` }
+    }
+
+    totalCents += amountCents
+
+    updatedInstallments.push({
+      ...originalInstallments[i],
+      amount: Number((amountCents / 100).toFixed(2)),
+      due_date: raw.due_date,
+    })
+  }
+
+  if (totalCents !== planCents) {
+    return {
+      error: `Installment total ${formatCents(totalCents)} does not match plan total ${formatCents(planCents)} (difference ${formatCents(totalCents - planCents)})`,
+    }
+  }
+
+  const correctedOption: PaymentOption = { ...targetOption, installments: updatedInstallments }
+  const correctedPaymentOptions: PaymentOption[] = paymentOptions.map((opt, idx) =>
+    idx === selectedOptionIndex ? correctedOption : opt,
+  )
+
+  const correctedObligationAction = {
+    ...obligationAction,
+    payment_options: correctedPaymentOptions,
+  } satisfies DocumentExtraction['proposed_actions'][number]
+
+  const correctedExtraction: DocumentExtraction = {
+    ...extraction,
+    proposed_actions: extraction.proposed_actions.map((action, idx) =>
+      idx === obligationActionIndex ? correctedObligationAction : action,
+    ),
+  }
+
+  const correctionRun: DocumentProcessingRunInsert = {
+    user_id: user.id,
+    document_id: documentId,
+    provider: 'correction',
+    model: 'user',
+    status: 'completed',
+    normalized_extraction: correctedExtraction,
+    raw_output: {
+      previous_run_id: run?.id ?? null,
+      correction: {
+        selected_option_index: selectedOptionIndex,
+        installments: updatedInstallments.map(({ amount, due_date }) => ({ amount, due_date })),
+      },
+    },
+  }
+
+  const { error: runError } = await supabase.from('document_processing_runs').insert(correctionRun)
+  if (runError) {
+    return { error: `Could not save corrected schedule: ${runError.message}` }
+  }
+
+  // The correction run is the single authoritative write; loaders prefer the
+  // latest processing run. We intentionally do not overwrite the legacy
+  // raw_ai_extraction field so the original AI evidence remains intact and
+  // success/failure is unambiguous.
+
+  revalidatePath('/documents')
+  revalidatePath('/inbox')
+  revalidatePath('/dashboard')
+  revalidatePath(`/documents/${documentId}`)
 
   return { success: true }
 }
