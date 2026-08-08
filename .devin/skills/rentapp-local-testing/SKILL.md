@@ -1,15 +1,15 @@
 ---
-name: Rentapp local Core MVP testing
-description: How to build and end-to-end test the Rentapp Next.js + Supabase web app from the `devin/ticket-001-foundation` branch (Core MVP).
+name: Rentapp local end-to-end testing
+description: How to build and end-to-end test the Rentapp Next.js + Supabase web app on a local Supabase stack.
 ---
 
-# Rentapp local Core MVP testing
+# Rentapp local end-to-end testing
 
 ## Repository / branch
 
 - Repo root: `/home/ubuntu/repos/Rentapp`
 - App directory: `web/`
-- Target branch: `devin/ticket-001-foundation`
+- Switch to the branch under test before running `npx supabase db reset`.
 
 ## Devin Secrets Needed
 
@@ -26,11 +26,16 @@ SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhY
 ```bash
 cd /home/ubuntu/repos/Rentapp/web
 npx supabase start
-npx supabase db query --local < ./supabase/migrations/001_ticket_001.sql
-npx supabase db query --local < ./supabase/migrations/002_core_mvp.sql
+npx supabase db reset
 ```
 
-The migrations grant the required table privileges to `authenticated`/`anon`.
+`db reset` applies all migrations in `supabase/migrations/`. If you see `permission denied for table ...`, the migration likely omits `GRANT` privileges for `authenticated`/`anon`; apply a temporary grant with:
+
+```bash
+npx supabase db query "GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated, anon;"
+```
+
+and file a fix to add `GRANT` statements to the migration.
 
 ## Static checks
 
@@ -77,7 +82,17 @@ npm run build
 14. Sign out redirects to `/login`; sign back in.
 15. Resize the browser to < 768px width; sidebar hides and a bottom nav appears (`Dashboard`, `Inbox`, `Add`, `Properties`, `Bills`).
 
+### Repairs / Work Orders (PR #8+)
+
+16. Sidebar and mobile nav show **Repairs**.
+17. `/repairs/new` creates a repair; `/repairs` Active filter lists it.
+18. Property detail **Add repair** pre-selects the property.
+19. Update status through `/repairs/[id]` (reported → scheduled → completed → closed); closed repairs move to `/repairs?filter=closed` and property **Repair history**.
+20. Urgent priority is highlighted in red on `/repairs`, dashboard **Repairs needing attention**, and property detail **Active repairs** heading.
+21. Regression: Bills/Payments still add bills and record payments.
+
 ## Common gotchas
 
-- `permission denied for table properties` → run the migrations shown above; they contain the required `GRANT` statements.
+- `permission denied for table ...` → migrations may be missing `GRANT` privileges for `authenticated`/`anon`; apply a temporary grant and file a migration fix.
+- The `RepairForm` status/priority selects are uncontrolled; after saving an existing repair, the select may not reflect the persisted value until the page is hard-refreshed. This is a sign the form is not keyed or not controlled.
 - Port 3000 may be claimed by a stale or auto-restarted `next dev` from the main checkout; use `ss -ltnp | grep 3000` and kill it, or simply test on port 3002.

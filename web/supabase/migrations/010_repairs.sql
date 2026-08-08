@@ -68,3 +68,7 @@ create policy "Users can delete own repairs"
   on public.repairs for delete
   to authenticated
   using (user_id = auth.uid());
+
+-- Grant table access to Supabase auth roles so RLS policies can be evaluated.
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on table public.repairs to authenticated;

@@ -90,6 +90,7 @@ export default async function RepairDetailPage({
       <section>
         <h2 className="text-lg font-semibold mb-3">Update repair</h2>
         <RepairForm
+          key={repair.updated_at}
           repair={repair}
           properties={properties}
           parties={parties}
