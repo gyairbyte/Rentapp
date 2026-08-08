@@ -194,7 +194,7 @@ describe('updatePayment', () => {
 
   it('rejects an update that would overpay the obligation', async () => {
     const client = makeClient({
-      existingPayment: { obligation_id: 'o-1', amount: 0 },
+      existingPayment: { obligation_id: '550e8400-e29b-41d4-a716-446655440001', amount: 0 },
       obligation: {
         expected_amount: 439.13,
         paid_amount: 0,
@@ -209,6 +209,25 @@ describe('updatePayment', () => {
 
     expect('error' in result).toBe(true)
     expect((result as { error: string }).error).toContain('exceeds the remaining balance')
+  })
+
+  it('rejects changing the obligation_id when editing a payment', async () => {
+    const client = makeClient({
+      existingPayment: { obligation_id: 'o-other', amount: 100 },
+      obligation: {
+        expected_amount: 439.13,
+        paid_amount: 0,
+        status: 'overdue',
+        property_id: 'p-1',
+        source_document_id: null,
+      },
+    })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await updatePayment('pay-1', makePaymentForm())
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('Payment obligation cannot be changed')
   })
 
   it('rejects updating a cross-user payment', async () => {

@@ -41,19 +41,32 @@ export function PaymentForm({
 
   const amountDefault = payment?.amount ?? defaultAmount ?? remaining
 
+  const obligationLabel = selectedObligation
+    ? `${selectedObligation.description || 'Obligation'} — $${selectedObligation.expected_amount.toFixed(2)} due ${selectedObligation.due_date}`
+    : 'Obligation'
+
   return (
     <form action={formAction} className="max-w-xl space-y-4">
-      <SelectField
-        name="obligation_id"
-        label="Obligation"
-        options={obligations.map((o) => ({
-          value: o.id,
-          label: `${o.description || 'Obligation'} — $${o.expected_amount.toFixed(2)} due ${o.due_date}`,
-        }))}
-        defaultValue={selectedObligationId}
-        error={fieldErrors.obligation_id?.[0]}
-        required
-      />
+      {payment ? (
+        <div>
+          <input type="hidden" name="obligation_id" defaultValue={payment.obligation_id} />
+          <label className="text-sm font-medium">Obligation</label>
+          <p className="mt-1 rounded-md border px-3 py-2 text-sm text-foreground/70">{obligationLabel}</p>
+          <p className="mt-1 text-xs text-foreground/50">Obligation is locked when editing a payment</p>
+        </div>
+      ) : (
+        <SelectField
+          name="obligation_id"
+          label="Obligation"
+          options={obligations.map((o) => ({
+            value: o.id,
+            label: `${o.description || 'Obligation'} — $${o.expected_amount.toFixed(2)} due ${o.due_date}`,
+          }))}
+          defaultValue={selectedObligationId}
+          error={fieldErrors.obligation_id?.[0]}
+          required
+        />
+      )}
       {selectedObligation && (
         <p className="text-sm text-foreground/70">
           Remaining: <span className="font-medium">${remaining.toFixed(2)}</span>

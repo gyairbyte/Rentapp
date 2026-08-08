@@ -131,10 +131,16 @@ export async function updatePayment(id: string, formData: FormData): Promise<Act
 
   if (!existing) return { error: 'Payment not found' }
 
+  // The obligation is immutable when editing an existing payment; only the
+  // amount, date, method, reference, and notes can be updated.
+  if (parsed.data.obligation_id !== existing.obligation_id) {
+    return { error: 'Payment obligation cannot be changed' }
+  }
+
   const { data: obligation } = await supabase
     .from('obligations')
     .select('expected_amount, paid_amount, status, property_id, source_document_id')
-    .eq('id', parsed.data.obligation_id)
+    .eq('id', existing.obligation_id)
     .eq('user_id', user.id)
     .single()
 
@@ -160,13 +166,10 @@ export async function updatePayment(id: string, formData: FormData): Promise<Act
 
   if (error) return { error: error.message }
 
-  await syncObligationPayments(parsed.data.obligation_id)
-  if (existing.obligation_id !== parsed.data.obligation_id) {
-    await syncObligationPayments(existing.obligation_id)
-  }
+  await syncObligationPayments(existing.obligation_id)
 
   revalidatePaymentPaths({
-    id: parsed.data.obligation_id,
+    id: existing.obligation_id,
     property_id: obligation.property_id,
     source_document_id: obligation.source_document_id,
   })
