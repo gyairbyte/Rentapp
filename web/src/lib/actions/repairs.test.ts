@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
-import { createRepair, updateRepair, deleteRepair, getRepairs } from './repairs'
+import { createRepair, updateRepair, deleteRepair, getRepairs, getRepairsForProperty } from './repairs'
 
 vi.mock('@/lib/actions/helpers', () => ({
   requireUser: vi.fn(),
@@ -275,17 +275,71 @@ describe('getRepairs', () => {
     ;(requireUser as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'u-1' })
   })
 
-  it('returns repairs for the current user', async () => {
+  it('returns only active repairs by default', async () => {
     const client = makeClient({
       repairs: [
         { id: 'r-1', status: 'reported', priority: 'urgent', title: 'Roof leak' },
-        { id: 'r-2', status: 'closed', priority: 'low', title: 'Old issue' },
+        { id: 'r-2', status: 'completed', priority: 'normal', title: 'Finished repair' },
+        { id: 'r-3', status: 'closed', priority: 'low', title: 'Old issue' },
       ],
     })
     ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
 
     const result = await getRepairs()
 
-    expect(result).toHaveLength(2)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('r-1')
+  })
+
+  it('includes completed and closed repairs when includeResolved is true', async () => {
+    const client = makeClient({
+      repairs: [
+        { id: 'r-1', status: 'reported', priority: 'urgent', title: 'Roof leak' },
+        { id: 'r-2', status: 'completed', priority: 'normal', title: 'Finished repair' },
+        { id: 'r-3', status: 'closed', priority: 'low', title: 'Old issue' },
+      ],
+    })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await getRepairs({ includeResolved: true })
+
+    expect(result).toHaveLength(3)
+  })
+})
+
+describe('getRepairsForProperty', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(requireUser as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'u-1' })
+  })
+
+  it('returns only active repairs for a property by default', async () => {
+    const client = makeClient({
+      repairs: [
+        { id: 'r-1', property_id: 'p-1', status: 'reported', priority: 'normal', title: 'Active' },
+        { id: 'r-2', property_id: 'p-1', status: 'completed', priority: 'normal', title: 'Completed' },
+      ],
+    })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await getRepairsForProperty('p-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].status).toBe('reported')
+  })
+
+  it('includes resolved repairs when includeResolved is true', async () => {
+    const client = makeClient({
+      repairs: [
+        { id: 'r-1', property_id: 'p-1', status: 'scheduled', priority: 'normal', title: 'Active' },
+        { id: 'r-2', property_id: 'p-1', status: 'completed', priority: 'normal', title: 'Completed' },
+        { id: 'r-3', property_id: 'p-1', status: 'closed', priority: 'low', title: 'Closed' },
+      ],
+    })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await getRepairsForProperty('p-1', { includeResolved: true })
+
+    expect(result).toHaveLength(3)
   })
 })

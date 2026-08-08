@@ -5,6 +5,7 @@ import { requireUser } from './helpers'
 import { toISODate, addDays, startOfMonth, endOfMonth } from './dates'
 import { buildBillsFromObligations, getBillHref, toMoneyCents } from '@/lib/bills'
 import { labelFor } from '@/lib/utils'
+import { isRepairActive } from '@/lib/repairs'
 import { OBLIGATION_CATEGORIES } from '@/lib/constants'
 import type { Obligation, Property, Document, Task, Payment, Account, Party, Repair } from '@/lib/types'
 
@@ -46,7 +47,7 @@ export async function getDashboardData() {
     supabase.from('parties').select('*').eq('user_id', user.id).returns<Party[]>(),
     supabase.from('documents').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).returns<Document[]>(),
     supabase.from('tasks').select('*').eq('user_id', user.id).order('due_date', { ascending: true, nullsFirst: false }).returns<Task[]>(),
-    supabase.from('repairs').select('*').eq('user_id', user.id).not('status', 'in', '(closed)').order('priority', { ascending: false }).order('reported_date', { ascending: false }).returns<Repair[]>(),
+    supabase.from('repairs').select('*').eq('user_id', user.id).order('priority', { ascending: false }).order('reported_date', { ascending: false }).returns<Repair[]>(),
   ])
 
   if (obligationsResult.error) throw new Error(obligationsResult.error.message)
@@ -142,7 +143,7 @@ export async function getDashboardData() {
     .slice(0, 20)
 
   const repairs = repairsResult.data ?? []
-  const activeRepairs = repairs.filter((r) => r.status !== 'closed')
+  const activeRepairs = repairs.filter((r) => isRepairActive(r.status))
   const urgentRepairs = activeRepairs.filter((r) => r.priority === 'urgent')
 
   const properties = propertiesRaw.map((property) => {

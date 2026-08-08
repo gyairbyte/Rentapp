@@ -9,6 +9,7 @@ import { getPartiesForProperty } from '@/lib/actions/party'
 import { getRepairsForProperty } from '@/lib/actions/repairs'
 import { ArchivePropertyButton } from '@/components/property/archive-property-button'
 import { labelFor } from '@/lib/utils'
+import { isRepairActive, isRepairResolved } from '@/lib/repairs'
 import { REPAIR_STATUSES, REPAIR_PRIORITIES } from '@/lib/constants'
 import { toISODate } from '@/lib/actions/dates'
 import { formatMoney, buildPropertySummary, toMoneyCents } from '@/lib/bills'
@@ -29,8 +30,8 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
     getRepairsForProperty(id, { includeResolved: true }),
   ])
 
-  const activeRepairs = repairs.filter((r) => r.status !== 'closed')
-  const closedRepairs = repairs.filter((r) => r.status === 'closed')
+  const activeRepairs = repairs.filter((r) => isRepairActive(r.status))
+  const resolvedRepairs = repairs.filter((r) => isRepairResolved(r.status))
 
   const today = toISODate(new Date())
 
@@ -285,11 +286,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         )}
       </section>
 
-      {closedRepairs.length > 0 && (
+      {resolvedRepairs.length > 0 && (
         <section>
           <h2 className="text-lg font-semibold mb-2">Repair history</h2>
           <ul className="grid gap-2 sm:grid-cols-2 opacity-70">
-            {closedRepairs.map((repair) => (
+            {resolvedRepairs.map((repair) => (
               <li key={repair.id} className="rounded-lg border p-3">
                 <Link href={`/repairs/${repair.id}`} className="font-medium hover:underline">
                   {repair.title}

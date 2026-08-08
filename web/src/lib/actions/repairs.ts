@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { repairSchema } from '@/lib/validations/repair'
 import { requireUser } from './helpers'
 import { formatZodErrors } from '@/lib/utils'
+import { isRepairActive } from '@/lib/repairs'
 import type { Repair } from '@/lib/types'
 
 type ActionResult =
@@ -22,13 +23,15 @@ function revalidateRepairPaths(repair: { id: string; property_id: string }) {
 export async function getRepairs(options: { includeResolved?: boolean } = {}): Promise<Repair[]> {
   const user = await requireUser()
   const supabase = await createClient()
-  let query = supabase.from('repairs').select('*').eq('user_id', user.id)
-  if (!options.includeResolved) {
-    query = query.not('status', 'in', '(closed)')
-  }
-  const { data, error } = await query.order('reported_date', { ascending: false }).returns<Repair[]>()
+  const { data, error } = await supabase
+    .from('repairs')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('reported_date', { ascending: false })
+    .returns<Repair[]>()
   if (error) throw new Error(error.message)
-  return data ?? []
+  const repairs = data ?? []
+  return options.includeResolved ? repairs : repairs.filter((r) => isRepairActive(r.status))
 }
 
 export async function getRepair(id: string): Promise<Repair | null> {
@@ -48,13 +51,16 @@ export async function getRepair(id: string): Promise<Repair | null> {
 export async function getRepairsForProperty(propertyId: string, options: { includeResolved?: boolean } = {}): Promise<Repair[]> {
   const user = await requireUser()
   const supabase = await createClient()
-  let query = supabase.from('repairs').select('*').eq('user_id', user.id).eq('property_id', propertyId)
-  if (!options.includeResolved) {
-    query = query.not('status', 'in', '(closed)')
-  }
-  const { data, error } = await query.order('reported_date', { ascending: false }).returns<Repair[]>()
+  const { data, error } = await supabase
+    .from('repairs')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('property_id', propertyId)
+    .order('reported_date', { ascending: false })
+    .returns<Repair[]>()
   if (error) throw new Error(error.message)
-  return data ?? []
+  const repairs = data ?? []
+  return options.includeResolved ? repairs : repairs.filter((r) => isRepairActive(r.status))
 }
 
 export async function createRepair(formData: FormData): Promise<ActionResult> {

@@ -59,17 +59,19 @@ describeDb('repairs database behavior', () => {
     expect(rows[0].property_id).toBe(propertyId)
   })
 
-  it('excludes closed repairs from active filter', async () => {
+  it('excludes completed and closed repairs from active filter', async () => {
     const active = await insertRepair({ status: 'scheduled' })
+    const completed = await insertRepair({ status: 'completed', title: 'Completed repair' })
     const closed = await insertRepair({ status: 'closed', title: 'Old repair' })
 
     await setAuthUser(client, userId)
     const { rows } = await client.query(
-      "select * from public.repairs where user_id = $1 and status not in ('closed')",
+      "select * from public.repairs where user_id = $1 and status not in ('completed','closed')",
       [userId],
     )
     const ids = rows.map((r) => r.id)
     expect(ids).toContain(active)
+    expect(ids).not.toContain(completed)
     expect(ids).not.toContain(closed)
   })
 

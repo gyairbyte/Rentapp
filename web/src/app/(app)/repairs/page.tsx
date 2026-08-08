@@ -3,6 +3,7 @@ import { getRepairs } from '@/lib/actions/repairs'
 import { getProperties } from '@/lib/actions/property'
 import { getParties } from '@/lib/actions/party'
 import { labelFor } from '@/lib/utils'
+import { isRepairActive, isRepairResolved } from '@/lib/repairs'
 import { REPAIR_STATUSES, REPAIR_PRIORITIES } from '@/lib/constants'
 
 export const dynamic = 'force-dynamic'
@@ -29,9 +30,9 @@ export default async function RepairsPage({
   ])
 
   const filtered = repairs.filter((r) => {
-    if (activeFilter === 'active') return r.status !== 'closed'
-    if (activeFilter === 'urgent') return r.status !== 'closed' && r.priority === 'urgent'
-    if (activeFilter === 'closed') return r.status === 'closed'
+    if (activeFilter === 'active') return isRepairActive(r.status)
+    if (activeFilter === 'urgent') return isRepairActive(r.status) && r.priority === 'urgent'
+    if (activeFilter === 'closed') return isRepairResolved(r.status)
     return true
   })
 
@@ -74,7 +75,7 @@ export default async function RepairsPage({
               : activeFilter === 'urgent'
               ? 'No urgent repairs.'
               : activeFilter === 'closed'
-              ? 'No closed repairs.'
+              ? 'No repair history.'
               : 'No repairs yet.'}
           </p>
           <Link href="/repairs/new" className="text-sm underline inline-block mt-2">
