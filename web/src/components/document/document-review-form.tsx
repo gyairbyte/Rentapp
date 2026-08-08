@@ -1,8 +1,13 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { confirmDocument, retryProcessDocument, archiveDocument } from '@/lib/actions/documents'
+import { useRouter } from 'next/navigation'
+import {
+  confirmDocument,
+  retryProcessDocument,
+  archiveDocument,
+  saveCorrectedInstallmentSchedule,
+} from '@/lib/actions/documents'
 import { formatDateOnly } from '@/lib/actions/dates'
 import { Field, SelectField } from '@/components/ui/form'
 import { DOCUMENT_TYPES, DIRECTIONS, OBLIGATION_CATEGORIES } from '@/lib/constants'
@@ -12,40 +17,45 @@ import {
   getInitialSelectedPaymentOptionIndex,
   getSelectableOptionsFingerprint,
 } from '@/lib/payment-options'
-import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm } from '@/lib/types'
+import {
+  formatCents,
+  toCents,
+  validateInstallmentPlan,
+  formatLatePaymentTerm,
+} from '@/lib/payment-validation'
+import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentInstallment } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
 
 function formatCurrency(amount: number | null) {
-  if (amount === null || amount === undefined) return ''
-  return `$${Number(amount).toFixed(2)}`
+  return formatCents(toCents(amount))
 }
 
-function formatOptionSummary(option: PaymentOption) {
+function optionLabel(option: PaymentOption): string {
+  if (option.option_type === 'installment_plan') {
+    const count = (option.installments ?? []).length
+    return count > 0 ? `Pay in ${count} installments` : 'Installment plan'
+  }
+  if (option.option_type === 'discounted') return 'Discounted full payment'
+  if (option.option_type === 'full') return 'Full payment'
+  return option.option_type.replace(/_/g, ' ')
+}
+
+function optionSummary(option: PaymentOption): string {
   const parts: string[] = []
   if (option.amount !== null) parts.push(formatCurrency(option.amount))
   if (option.due_date) parts.push(`due ${formatDateOnly(option.due_date)}`)
-  if (option.discount_amount !== null && option.discount_amount > 0) parts.push(`discount ${formatCurrency(option.discount_amount)}`)
-  if (parts.length > 0) return parts.join(' · ')
-  return option.description ?? option.option_type.replace(/_/g, ' ')
+  if (option.discount_amount !== null && option.discount_amount > 0) {
+    parts.push(`save ${formatCurrency(option.discount_amount)}`)
+  }
+  return parts.join(' · ')
 }
 
-function formatTerm(term: PaymentTerm) {
-  const parts: string[] = []
-  if (term.term_type) parts.push(term.term_type.replace(/_/g, ' '))
-  if (term.rate !== null && term.rate > 0) parts.push(`${(term.rate * 100).toFixed(0)}%`)
-  if (term.amount !== null) parts.push(formatCurrency(term.amount))
-  if (term.effective_date) parts.push(`effective ${formatDateOnly(term.effective_date)}`)
-  if (term.due_date) parts.push(`due ${formatDateOnly(term.due_date)}`)
-  if (term.description) parts.push(term.description)
-  return parts.filter(Boolean).join(' · ')
-}
-
-function allLatePaymentTerms(option: PaymentOption | undefined): PaymentTerm[] {
+function allLatePaymentTerms(option: PaymentOption | undefined) {
   if (!option) return []
-  const terms: PaymentTerm[] = [...(option.late_payment_terms ?? [])]
+  const terms = [...(option.late_payment_terms ?? [])]
   if (option.penalty_amount !== null && option.penalty_date) {
     terms.push({
-      term_type: 'penalty',
+      term_type: 'penalty' as const,
       amount: option.penalty_amount,
       rate: null,
       effective_date: option.penalty_date,
@@ -54,6 +64,136 @@ function allLatePaymentTerms(option: PaymentOption | undefined): PaymentTerm[] {
     })
   }
   return terms
+}
+
+function installmentLateDisplay(inst: PaymentInstallment): string {
+  const baseCents = toCents(inst.amount)
+  const lateTerms = inst.late_payment_terms ?? []
+  if (baseCents === null || lateTerms.length === 0) return '—'
+
+  const term = lateTerms[0]
+  if (term.rate !== null && term.rate > 0) {
+    const totalCents = baseCents + Math.round(baseCents * term.rate)
+    return `${(term.rate * 100).toFixed(0)}% late ${formatCents(totalCents)}`
+  }
+  if (term.amount !== null) {
+    return formatCents(toCents(term.amount))
+  }
+  return '—'
+}
+
+function InstallmentScheduleEditor({
+  option,
+  documentId,
+  selectedOptionIndex,
+  onSaved,
+  onCancel,
+}: {
+  option: PaymentOption
+  documentId: string
+  selectedOptionIndex: number
+  onSaved: () => void
+  onCancel: () => void
+}) {
+  const [installments, setInstallments] = useState<PaymentInstallment[]>(
+    () => (option.installments ?? []).map((inst) => ({ ...inst })),
+  )
+  const [isPending, setIsPending] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  function updateInstallment(index: number, patch: Partial<PaymentInstallment>) {
+    setInstallments((prev) => prev.map((inst, i) => (i === index ? { ...inst, ...patch } : inst)))
+  }
+
+  const editValidation = validateInstallmentPlan({ ...option, installments })
+
+  async function handleSave() {
+    if (!editValidation.valid) return
+    setIsPending(true)
+    setEditError(null)
+    const result = await saveCorrectedInstallmentSchedule(
+      documentId,
+      selectedOptionIndex,
+      installments.map(({ amount, due_date }) => ({ amount, due_date })),
+    )
+    setIsPending(false)
+    if ('error' in result) {
+      setEditError(result.error)
+    } else {
+      onSaved()
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-foreground/60 border-b">
+            <th className="pb-2 font-medium">#</th>
+            <th className="pb-2 font-medium">Amount</th>
+            <th className="pb-2 font-medium">Due date</th>
+            <th className="pb-2 font-medium">Late amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {installments.map((inst, i) => (
+            <tr key={i} className="border-b last:border-0">
+              <td className="py-2">{i + 1}</td>
+              <td className="py-2 pr-2">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={inst.amount ?? ''}
+                  onChange={(e) =>
+                    updateInstallment(i, { amount: e.target.value === '' ? null : Number(e.target.value) })
+                  }
+                  className="w-full rounded-md border px-2 py-1 text-sm"
+                  aria-label={`Installment ${i + 1} amount`}
+                />
+              </td>
+              <td className="py-2 pr-2">
+                <input
+                  type="date"
+                  value={inst.due_date ?? ''}
+                  onChange={(e) => updateInstallment(i, { due_date: e.target.value })}
+                  className="w-full rounded-md border px-2 py-1 text-sm"
+                  aria-label={`Installment ${i + 1} due date`}
+                />
+              </td>
+              <td className="py-2 text-foreground/70">{installmentLateDisplay(inst)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="text-sm space-y-1">
+        <p>
+          Plan total: {editValidation.planTotalFormatted} · Installment total: {editValidation.installmentTotalFormatted} · Difference: {editValidation.differenceFormatted}
+        </p>
+        {!editValidation.valid && <p className="text-red-600">{editValidation.error}</p>}
+        {editError && <p className="text-red-600">{editError}</p>}
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isPending || !editValidation.valid}
+            className="rounded-md bg-foreground text-background px-3 py-1.5 text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            Save corrections
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isPending}
+            className="rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-foreground/10 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function DocumentReviewForm({
@@ -76,6 +216,7 @@ export function DocumentReviewForm({
   const router = useRouter()
   const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isEditingSchedule, setIsEditingSchedule] = useState(false)
 
   const proposedObligation = extraction.proposed_actions.find((a) => a.type === 'obligation')
   const proposedTask = extraction.proposed_actions.find((a) => a.type === 'task')
@@ -93,8 +234,6 @@ export function DocumentReviewForm({
     fingerprint: getSelectableOptionsFingerprint(selectableOptions),
   }))
 
-  // Derive a safe, valid selection without mutating state during render.
-  // If the authoritative payment options have changed, discard any stale selection.
   const selectionIsCurrent = selection.fingerprint === currentFingerprint
   const effectiveSelectedOriginalIndex =
     selectionIsCurrent &&
@@ -102,9 +241,9 @@ export function DocumentReviewForm({
     isSelectablePaymentOption(paymentOptions[selection.originalIndex])
       ? selection.originalIndex
       : getInitialSelectedPaymentOptionIndex(selectableOptions)
+
   const selectedOption = effectiveSelectedOriginalIndex !== null ? paymentOptions[effectiveSelectedOriginalIndex] ?? null : null
 
-  // High-confidence deterministic matches may be prefilled, but remain visibly reviewable.
   const suggestedPropertyId = document.property_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.property_id : null)
   const suggestedAccountId = document.account_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.account_id : null)
   const suggestedPartyId = document.party_id ?? (proposedMatch.confidence === 'high' ? proposedMatch.party_id : null)
@@ -112,11 +251,20 @@ export function DocumentReviewForm({
   const defaultPropertyId = suggestedPropertyId ?? ''
 
   const filteredAccounts = defaultPropertyId ? accounts.filter((a) => a.property_id === defaultPropertyId) : accounts
-  const filteredParties = defaultPropertyId ? parties.filter((p) => p.property_id === defaultPropertyId || p.property_id === null) : parties
+  const filteredParties = defaultPropertyId
+    ? parties.filter((p) => p.property_id === defaultPropertyId || p.property_id === null)
+    : parties
 
   const derivedAmount = selectedOption?.amount ?? proposedObligation?.expected_amount ?? extraction.amount_due.value ?? ''
   const derivedDueDate = selectedOption?.due_date ?? proposedObligation?.due_date ?? extraction.due_date.value ?? ''
-  const canConfirmPayment = !hasPaymentOptions || effectiveSelectedOriginalIndex !== null
+
+  const installmentValidation = selectedOption && selectedOption.option_type === 'installment_plan'
+    ? validateInstallmentPlan(selectedOption)
+    : null
+
+  const canConfirmPayment =
+    !hasPaymentOptions ||
+    (effectiveSelectedOriginalIndex !== null && (!installmentValidation || installmentValidation.valid))
 
   async function handleConfirm(formData: FormData) {
     setIsPending(true)
@@ -154,6 +302,12 @@ export function DocumentReviewForm({
       router.push('/inbox')
       router.refresh()
     }
+  }
+
+  function handleScheduleSaved() {
+    setIsEditingSchedule(false)
+    setSelection({ originalIndex: null, fingerprint: currentFingerprint })
+    router.refresh()
   }
 
   return (
@@ -293,12 +447,15 @@ export function DocumentReviewForm({
                     name="payment_option"
                     value={originalIndex}
                     checked={effectiveSelectedOriginalIndex === originalIndex}
-                    onChange={() => setSelection({ originalIndex, fingerprint: currentFingerprint })}
+                    onChange={() => {
+                      setIsEditingSchedule(false)
+                      setSelection({ originalIndex, fingerprint: currentFingerprint })
+                    }}
                     className="mt-1"
                   />
                   <div className="flex-1">
-                    <p className="font-medium">{option.description ?? option.option_type.replace(/_/g, ' ')}</p>
-                    <p className="text-sm text-foreground/70">{formatOptionSummary(option)}</p>
+                    <p className="font-medium">{optionLabel(option)}</p>
+                    <p className="text-sm text-foreground/70">{optionSummary(option)}</p>
                   </div>
                 </div>
               </label>
@@ -307,54 +464,80 @@ export function DocumentReviewForm({
 
           {selectedOption && (
             <div className="rounded-md border p-3 space-y-3">
-              <h3 className="font-medium">Selected schedule</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium">Selected schedule</h3>
+                {selectedOption.option_type === 'installment_plan' && !isEditingSchedule && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingSchedule(true)}
+                    disabled={isPending}
+                    className="text-sm underline text-foreground/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    Edit schedule
+                  </button>
+                )}
+              </div>
+
               {selectedOption.option_type === 'installment_plan' && (selectedOption.installments ?? []).length > 0 ? (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-foreground/60 border-b">
-                      <th className="pb-2 font-medium">#</th>
-                      <th className="pb-2 font-medium">Amount</th>
-                      <th className="pb-2 font-medium">Due date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(selectedOption.installments ?? []).map((inst, i) => (
-                      <tr key={i} className="border-b last:border-0">
-                        <td className="py-2">{i + 1}</td>
-                        <td className="py-2">{formatCurrency(inst.amount)}</td>
-                        <td className="py-2">{formatDateOnly(inst.due_date)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <>
+                  {isEditingSchedule && effectiveSelectedOriginalIndex !== null ? (
+                    <InstallmentScheduleEditor
+                      key={`${effectiveSelectedOriginalIndex}-${currentFingerprint}`}
+                      option={selectedOption}
+                      documentId={document.id}
+                      selectedOptionIndex={effectiveSelectedOriginalIndex}
+                      onSaved={handleScheduleSaved}
+                      onCancel={() => setIsEditingSchedule(false)}
+                    />
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-foreground/60 border-b">
+                          <th className="pb-2 font-medium">#</th>
+                          <th className="pb-2 font-medium">Amount</th>
+                          <th className="pb-2 font-medium">Due date</th>
+                          <th className="pb-2 font-medium">Late amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedOption.installments ?? []).map((inst, i) => (
+                          <tr key={i} className="border-b last:border-0">
+                            <td className="py-2">{i + 1}</td>
+                            <td className="py-2">{formatCurrency(inst.amount)}</td>
+                            <td className="py-2">{formatDateOnly(inst.due_date)}</td>
+                            <td className="py-2 text-foreground/70">{installmentLateDisplay(inst)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {installmentValidation && !installmentValidation.valid && !isEditingSchedule && (
+                    <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-900">
+                      <p className="font-medium">Schedule cannot be confirmed</p>
+                      <p>
+                        Plan total {installmentValidation.planTotalFormatted} · Installment total {installmentValidation.installmentTotalFormatted} · Difference {installmentValidation.differenceFormatted}
+                      </p>
+                      <p>{installmentValidation.error}</p>
+                      <p className="text-foreground/70">Edit and save the schedule before confirming.</p>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="text-sm">
                   <p className="font-medium">{formatCurrency(selectedOption.amount)} due {formatDateOnly(selectedOption.due_date)}</p>
                 </div>
               )}
 
-              {(allLatePaymentTerms(selectedOption).length > 0 ||
-                (selectedOption.installments ?? []).some((inst) => (inst.late_payment_terms ?? []).length > 0)) && (
+              {allLatePaymentTerms(selectedOption).length > 0 && (
                 <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm">
                   <h4 className="font-medium text-amber-900 mb-1">Late-payment terms</h4>
-                  {allLatePaymentTerms(selectedOption).length > 0 && (
-                    <ul className="space-y-1 list-disc pl-4 text-amber-900/80">
-                      {allLatePaymentTerms(selectedOption).map((term, i) => (
-                        <li key={i}>{formatTerm(term)}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {(selectedOption.installments ?? []).some((inst) => (inst.late_payment_terms ?? []).length > 0) && (
-                    <ul className="mt-2 space-y-1 pl-4 text-amber-900/80">
-                      {(selectedOption.installments ?? []).map((inst, i) =>
-                        (inst.late_payment_terms ?? []).map((term, j) => (
-                          <li key={`${i}-${j}`} className="list-disc">
-                            Installment {i + 1}: {formatTerm(term)}
-                          </li>
-                        ))
-                      )}
-                    </ul>
-                  )}
+                  <ul className="space-y-1 list-disc pl-4 text-amber-900/80">
+                    {allLatePaymentTerms(selectedOption).map((term, i) => {
+                      const baseCents = toCents(selectedOption.amount)
+                      return <li key={i}>{baseCents !== null ? formatLatePaymentTerm(baseCents, term) : ''}</li>
+                    })}
+                  </ul>
                 </div>
               )}
             </div>
@@ -365,7 +548,7 @@ export function DocumentReviewForm({
               <h4 className="font-medium mb-1">Other terms</h4>
               <ul className="space-y-1 list-disc pl-4">
                 {nonSelectableOptions.map((option, i) => (
-                  <li key={i}>{option.description ?? option.option_type.replace(/_/g, ' ')} — {formatOptionSummary(option)}</li>
+                  <li key={i}>{option.description ?? option.option_type.replace(/_/g, ' ')} — {optionSummary(option)}</li>
                 ))}
               </ul>
             </div>
@@ -375,7 +558,7 @@ export function DocumentReviewForm({
 
       {extraction.requires !== 'neither' && (
         <section className="space-y-4 rounded-lg border p-4">
-          <h2 className="text-lg font-semibold">Proposed obligation</h2>
+          <h2 className="text-lg font-semibold">Obligation details</h2>
           <SelectField
             name="direction"
             label="Direction"
@@ -393,12 +576,7 @@ export function DocumentReviewForm({
             label="Description"
             defaultValue={proposedObligation?.description ?? `${extraction.issuer.value ?? document.original_filename} — ${extraction.likely_category.value ?? ''}`}
           />
-          {hasPaymentOptions ? (
-            <>
-              <Field name="amount" label="Amount (set by selected payment option)" type="number" step="0.01" value={derivedAmount} readOnly />
-              <Field name="due_date" label="Due date (set by selected payment option)" type="date" value={derivedDueDate} readOnly />
-            </>
-          ) : (
+          {!hasPaymentOptions && (
             <>
               <Field name="amount" label="Amount due" type="number" step="0.01" defaultValue={derivedAmount} />
               <Field name="due_date" label="Due date" type="date" defaultValue={derivedDueDate} />

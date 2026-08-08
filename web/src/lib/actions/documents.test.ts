@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { confirmDocument, getDocumentWithDetails } from './documents'
+import { confirmDocument, getDocumentWithDetails, saveCorrectedInstallmentSchedule } from './documents'
 import { emptyExtraction } from '@/lib/document-intelligence/extraction-schema'
 
 vi.mock('@/lib/actions/helpers', () => ({
@@ -126,10 +126,14 @@ function makeExtraction(overrides: Partial<DocumentExtraction> = {}): DocumentEx
   }
 }
 
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value))
+}
+
 function makeTaxExtraction(): DocumentExtraction {
   return makeExtraction({
     likely_category: extracted('school_tax'),
-    proposed_actions: [obligationAction(taxPaymentOptions)],
+    proposed_actions: [obligationAction(clone(taxPaymentOptions))],
   })
 }
 
@@ -186,6 +190,16 @@ function makeLegacyExtractionRaw(): unknown {
   return extraction
 }
 
+function makeUnbalancedTaxExtraction(): DocumentExtraction {
+  const extraction = makeTaxExtraction()
+  const obligationAction = extraction.proposed_actions.find((a) => a.type === 'obligation')
+  const option = obligationAction?.payment_options.find((o) => o.option_type === 'installment_plan')
+  if (option && option.installments) {
+    option.installments[3].amount = 439.13
+  }
+  return extraction
+}
+
 function makeSupabaseClient({
   extraction,
   rpcReturn,
@@ -206,7 +220,7 @@ function makeSupabaseClient({
     review_status: 'unreviewed',
   }
 
-  const runRows = extraction ? [{ normalized_extraction: extraction }] : []
+  const runRows = extraction ? [{ id: 'run-1', normalized_extraction: extraction }] : []
 
   function mockFrom(table: string) {
     let single = false
@@ -224,6 +238,9 @@ function makeSupabaseClient({
         single = true
         return builder
       }),
+      insert: vi.fn(() => builder),
+      update: vi.fn(() => builder),
+      then: vi.fn((resolve) => resolve({ data: [], error: null })),
       returns: vi.fn(() => {
         if (table === 'documents') {
           if (single) {
@@ -463,6 +480,95 @@ describe('confirmDocument', () => {
     expect(args.p_payment_options[2].option_type).toBe('full')
     expect(args.p_amount).toBe(1756.51)
     expect(args.p_due_date).toBe('2026-10-31')
+  })
+})
+
+describe('saveCorrectedInstallmentSchedule', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(requireUser as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'u-1' })
+  })
+
+  it('saves the corrected schedule as a new authoritative version', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+      { amount: 439.13, due_date: '2026-08-03' },
+      { amount: 439.13, due_date: '2026-09-14' },
+      { amount: 439.13, due_date: '2026-10-31' },
+      { amount: 439.12, due_date: '2026-12-07' },
+    ])
+
+    expect(result).toEqual({ success: true })
+    expect(client.from).toHaveBeenCalledWith('document_processing_runs')
+    expect(client.from).toHaveBeenCalledWith('documents')
+  })
+
+  it('rejects an unbalanced corrected schedule', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+      { amount: 439.13, due_date: '2026-08-03' },
+      { amount: 439.13, due_date: '2026-09-14' },
+      { amount: 439.13, due_date: '2026-10-31' },
+      { amount: 439.13, due_date: '2026-12-07' },
+    ])
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('does not match')
+  })
+
+  it('rejects a changed installment count', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const result = await saveCorrectedInstallmentSchedule('d-1', 2, [
+      { amount: 439.13, due_date: '2026-08-03' },
+      { amount: 439.12, due_date: '2026-09-14' },
+    ])
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('count')
+  })
+})
+
+describe('confirmDocument', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(requireUser as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'u-1' })
+  })
+
+  it('rejects an unbalanced authoritative installment plan without calling the RPC', async () => {
+    const extraction = makeUnbalancedTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const form = makeForm({ selected_payment_option_index: '2' })
+    const result = await confirmDocument('d-1', form)
+
+    expect('error' in result).toBe(true)
+    expect((result as { error: string }).error).toContain('does not match')
+    expect(client.rpc).not.toHaveBeenCalled()
+  })
+
+  it('passes the corrected installment plan to the RPC after editing', async () => {
+    const extraction = makeTaxExtraction()
+    const client = makeSupabaseClient({ extraction })
+    ;(createClient as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(client)
+
+    const form = makeForm({ selected_payment_option_index: '2' })
+    const result = await confirmDocument('d-1', form)
+
+    expect(result).toEqual({ success: true })
+    expect(client.rpc).toHaveBeenCalledTimes(1)
+    const args = client.rpc.mock.calls[0][1]
+    expect(args.p_selected_payment_option_index).toBe(2)
+    expect(args.p_payment_options[2].installments[3].amount).toBe(439.12)
   })
 })
 

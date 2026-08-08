@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterAll, beforeAll } from 'vitest'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { Client } from 'pg'
 import {
   createPoolOrClient,
@@ -9,6 +11,25 @@ import {
   setAuthUser,
   type DbContext,
 } from './test-helpers'
+
+const unbalancedTaxPaymentOptions = [
+  {
+    option_type: 'installment_plan',
+    amount: 1756.51,
+    due_date: '2026-10-31',
+    description: 'Four installment plan',
+    discount_amount: null,
+    penalty_amount: null,
+    penalty_date: null,
+    late_payment_terms: [],
+    installments: [
+      { amount: 439.13, due_date: '2026-08-03', description: 'Installment 1 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-09-14', description: 'Installment 2 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-10-31', description: 'Installment 3 of 4', late_payment_terms: [] },
+      { amount: 439.13, due_date: '2026-12-07', description: 'Installment 4 of 4', late_payment_terms: [] },
+    ],
+  },
+]
 
 const taxPaymentOptions = [
   {
@@ -462,6 +483,72 @@ describeDb('confirm_document multi-payment behavior', () => {
         selected_payment_option_index: 3,
       }),
     ).rejects.toThrow('non-selectable payment option type')
+
+    const { rows } = await client.query<{ count: number }>(
+      'select count(*)::int as count from public.obligations where source_document_id = $1',
+      [documentId],
+    )
+    expect(rows[0].count).toBe(0)
+  })
+
+  it('rejects an unbalanced installment plan and creates zero obligations', async () => {
+    const documentId = await createTestDocument(client, ctx.userId, {})
+    await setAuthUser(client, ctx.userId)
+
+    await expect(
+      callConfirm(client, ctx.userId, documentId, ctx.propertyId, {
+        payment_options: unbalancedTaxPaymentOptions,
+        selected_payment_option_index: 0,
+      }),
+    ).rejects.toThrow('Installment total')
+
+    const { rows } = await client.query<{ count: number }>(
+      'select count(*)::int as count from public.obligations where source_document_id = $1',
+      [documentId],
+    )
+    expect(rows[0].count).toBe(0)
+
+    const { rows: docs } = await client.query(
+      'select review_status from public.documents where id = $1',
+      [documentId],
+    )
+    expect(docs[0].review_status).not.toBe('confirmed')
+  })
+
+  it('creates exactly four obligations from the corrected fixture, including installment 4 at $439.12', async () => {
+    const documentId = await createTestDocument(client, ctx.userId, {})
+    await callConfirm(client, ctx.userId, documentId, ctx.propertyId, {
+      payment_options: taxPaymentOptions,
+      selected_payment_option_index: 2,
+    })
+
+    const { rows } = await client.query(
+      'select expected_amount, source_item_key from public.obligations where source_document_id = $1 order by source_item_key',
+      [documentId],
+    )
+
+    expect(rows).toHaveLength(4)
+    expect(Number(rows[3].expected_amount)).toBe(439.12)
+    expect(rows[3].source_item_key).toBe('option_2:installment_4')
+  })
+
+  it('upgrades from migration 008 to 009 and rejects an unbalanced schedule', async () => {
+    await setAuthUser(client, ctx.userId)
+    const migrationsDir = join(process.cwd(), 'supabase', 'migrations')
+    const migration008 = readFileSync(join(migrationsDir, '008_confirm_document_option_types.sql'), 'utf-8')
+    const migration009 = readFileSync(join(migrationsDir, '009_installment_exact_cent_validation.sql'), 'utf-8')
+
+    await client.query('drop function if exists public.confirm_document(uuid, uuid, uuid, uuid, uuid, text, text, date, date, date, date, numeric, text, text, text, text, date, text, jsonb, int)')
+    await client.query(migration008)
+    await client.query(migration009)
+
+    const documentId = await createTestDocument(client, ctx.userId, {})
+    await expect(
+      callConfirm(client, ctx.userId, documentId, ctx.propertyId, {
+        payment_options: unbalancedTaxPaymentOptions,
+        selected_payment_option_index: 0,
+      }),
+    ).rejects.toThrow('Installment total')
 
     const { rows } = await client.query<{ count: number }>(
       'select count(*)::int as count from public.obligations where source_document_id = $1',
