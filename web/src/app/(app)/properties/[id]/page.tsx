@@ -8,12 +8,9 @@ import { getDocumentsForProperty } from '@/lib/actions/documents'
 import { getPartiesForProperty } from '@/lib/actions/party'
 import { ArchivePropertyButton } from '@/components/property/archive-property-button'
 import { startOfMonth, endOfMonth, toISODate } from '@/lib/actions/dates'
+import { formatMoney, toMoneyCents } from '@/lib/bills'
 
 export const dynamic = 'force-dynamic'
-
-function formatCurrency(amount: number) {
-  return `$${amount.toFixed(2)}`
-}
 
 export default async function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -33,15 +30,22 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   const monthEnd = toISODate(endOfMonth(new Date()))
   const inMonth = (dueDate: string) => dueDate >= monthStart && dueDate <= monthEnd
 
-  const rentObligations = obligations.filter((o) => o.category === 'rent' && inMonth(o.due_date))
-  const rentExpected = rentObligations.reduce((sum, o) => sum + o.expected_amount, 0)
-  const rentReceived = rentObligations.reduce((sum, o) => sum + o.paid_amount, 0)
+  const rentInMonth = obligations.filter((o) => o.category === 'rent' && inMonth(o.due_date))
+  const rentExpectedCents = rentInMonth.reduce((sum, o) => sum + toMoneyCents(o.expected_amount), 0)
+  const rentReceivedCents = rentInMonth.reduce((sum, o) => sum + toMoneyCents(o.paid_amount), 0)
 
-  const bills = obligations.filter((o) => o.direction === 'payable' && inMonth(o.due_date))
-  const billsDue = bills.reduce((sum, o) => sum + o.expected_amount, 0)
-  const billsPaid = bills.reduce((sum, o) => sum + o.paid_amount, 0)
+  const payableInMonth = obligations.filter((o) => o.direction === 'payable' && inMonth(o.due_date))
+  const billsDueCents = payableInMonth.reduce(
+    (sum, o) => sum + Math.max(0, toMoneyCents(o.expected_amount) - toMoneyCents(o.paid_amount)),
+    0,
+  )
+  const billsPaidCents = payableInMonth.reduce((sum, o) => sum + toMoneyCents(o.paid_amount), 0)
 
-  const outstanding = obligations.filter((o) => o.paid_amount < o.expected_amount)
+  const totalOutstandingCents = obligations.reduce(
+    (sum, o) => sum + Math.max(0, toMoneyCents(o.expected_amount) - toMoneyCents(o.paid_amount)),
+    0,
+  )
+  const openObligations = obligations.filter((o) => o.paid_amount < o.expected_amount).length
   const upcoming = obligations
     .filter((o) => o.due_date >= today && o.paid_amount < o.expected_amount)
     .slice(0, 10)
@@ -76,26 +80,27 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border p-4">
           <p className="text-sm text-foreground/70">Rent expected</p>
-          <p className="text-xl font-semibold">{formatCurrency(rentExpected)}</p>
+          <p className="text-xl font-semibold">{formatMoney(rentExpectedCents)}</p>
         </div>
         <div className="rounded-lg border p-4">
           <p className="text-sm text-foreground/70">Rent received</p>
-          <p className="text-xl font-semibold">{formatCurrency(rentReceived)}</p>
+          <p className="text-xl font-semibold">{formatMoney(rentReceivedCents)}</p>
         </div>
         <div className="rounded-lg border p-4">
           <p className="text-sm text-foreground/70">Rent outstanding</p>
-          <p className="text-xl font-semibold">{formatCurrency(rentExpected - rentReceived)}</p>
+          <p className="text-xl font-semibold">{formatMoney(rentExpectedCents - rentReceivedCents)}</p>
         </div>
         <div className="rounded-lg border p-4">
-          <p className="text-sm text-foreground/70">Open obligations</p>
-          <p className="text-xl font-semibold">{outstanding.length}</p>
+          <p className="text-sm text-foreground/70">Outstanding</p>
+          <p className="text-xl font-semibold">{formatMoney(totalOutstandingCents)}</p>
+          <p className="text-sm text-foreground/70">{openObligations} open obligations</p>
         </div>
       </section>
 
       <section>
         <h2 className="text-lg font-semibold mb-2">This month</h2>
         <p className="text-foreground/70">
-          Bills due: {formatCurrency(billsDue)} · Bills paid: {formatCurrency(billsPaid)} · Outstanding: {formatCurrency(billsDue - billsPaid)}
+          Bills due: {formatMoney(billsDueCents)} · Bills paid: {formatMoney(billsPaidCents)} · Outstanding: {formatMoney(totalOutstandingCents)}
         </p>
       </section>
 
@@ -110,21 +115,24 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
           <p className="text-foreground/70">No upcoming obligations.</p>
         ) : (
           <ul className="space-y-2">
-            {upcoming.map((o) => (
-              <li key={o.id} className="rounded-lg border p-3 flex items-center justify-between">
-                <div>
-                  <Link href={`/obligations/${o.id}`} className="font-medium hover:underline">
-                    {o.description || o.category.replace(/_/g, ' ')}
+            {upcoming.map((o) => {
+              const href = o.source_document_id ? `/bills/${o.source_document_id}` : `/bills/${o.id}`
+              return (
+                <li key={o.id} className="rounded-lg border p-3 flex items-center justify-between">
+                  <div>
+                    <Link href={href} className="font-medium hover:underline">
+                      {o.description || o.category.replace(/_/g, ' ')}
+                    </Link>
+                    <p className="text-sm text-foreground/70">
+                      {o.due_date} · {formatMoney(Math.max(0, toMoneyCents(o.expected_amount) - toMoneyCents(o.paid_amount)))} remaining
+                    </p>
+                  </div>
+                  <Link href={href} className="text-sm underline">
+                    View
                   </Link>
-                  <p className="text-sm text-foreground/70">
-                    {o.due_date} · {formatCurrency(o.expected_amount - o.paid_amount)} remaining
-                  </p>
-                </div>
-                <Link href={`/obligations/${o.id}/pay`} className="text-sm underline">
-                  Pay
-                </Link>
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>
@@ -169,7 +177,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
                   {r.description || r.category.replace(/_/g, ' ')}
                 </Link>
                 <p className="text-sm text-foreground/70">
-                  {formatCurrency(r.amount)} {r.frequency} on day {r.day_of_month}
+                  {formatMoney(toMoneyCents(r.amount))} {r.frequency} on day {r.day_of_month}
                 </p>
               </li>
             ))}

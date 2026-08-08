@@ -6,6 +6,7 @@ import { SignOutButton } from './sign-out-button'
 
 const links = [
   { href: '/dashboard', label: 'Dashboard' },
+  { href: '/bills', label: 'Bills' },
   { href: '/inbox', label: 'Inbox' },
   { href: '/properties', label: 'Properties' },
   { href: '/obligations', label: 'Obligations' },
