@@ -108,12 +108,6 @@ export function validateInstallmentPlan(option: PaymentOption | InstallmentPlanL
   }
 
   const planCents = toCents(option.amount)
-  if (planCents === null || planCents <= 0) {
-    return {
-      ...empty,
-      error: 'Plan amount must be a positive money value valid to cents',
-    }
-  }
 
   const installments = option.installments ?? []
   if (installments.length === 0) {
@@ -136,6 +130,7 @@ export function validateInstallmentPlan(option: PaymentOption | InstallmentPlanL
         ...empty,
         planTotalCents: planCents,
         planTotalFormatted: formatCents(planCents),
+        installmentTotalCents: null,
         error: `Installment ${i + 1} amount must be a positive money value valid to cents`,
       }
     }
@@ -145,11 +140,38 @@ export function validateInstallmentPlan(option: PaymentOption | InstallmentPlanL
         ...empty,
         planTotalCents: planCents,
         planTotalFormatted: formatCents(planCents),
+        installmentTotalCents: null,
         error: `Installment ${i + 1} due date must be a valid date`,
       }
     }
 
     totalCents += instCents
+  }
+
+  if (planCents === null) {
+    return {
+      valid: false,
+      planTotalCents: null,
+      installmentTotalCents: totalCents,
+      differenceCents: null,
+      planTotalFormatted: '',
+      installmentTotalFormatted: formatCents(totalCents),
+      differenceFormatted: '',
+      error: 'Enter the plan total from the document',
+    }
+  }
+
+  if (planCents <= 0) {
+    return {
+      valid: false,
+      planTotalCents: planCents,
+      installmentTotalCents: totalCents,
+      differenceCents: null,
+      planTotalFormatted: formatCents(planCents),
+      installmentTotalFormatted: formatCents(totalCents),
+      differenceFormatted: '',
+      error: 'Plan total must be a positive money value valid to cents',
+    }
   }
 
   const difference = totalCents - planCents

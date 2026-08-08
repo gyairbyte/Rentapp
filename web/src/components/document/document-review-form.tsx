@@ -23,7 +23,7 @@ import {
   validateInstallmentPlan,
   formatLatePaymentTerm,
 } from '@/lib/payment-validation'
-import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm } from '@/lib/types'
+import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm, ProposedAction } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
 
 function formatCurrency(amount: number | null) {
@@ -89,14 +89,38 @@ function installmentLateDisplay(inst: DraftInstallment): string {
   return '—'
 }
 
+function suggestedPlanTotalInput(
+  option: PaymentOption,
+  obligationAction: ProposedAction | undefined,
+  extraction: DocumentExtraction,
+): { value: string; suggested: boolean } {
+  const optionCents = toCents(option.amount)
+  if (optionCents !== null && optionCents > 0) {
+    return { value: String(option.amount), suggested: false }
+  }
+  const obligationCents = toCents(obligationAction?.expected_amount ?? null)
+  if (obligationCents !== null && obligationCents > 0) {
+    return { value: String(obligationAction?.expected_amount ?? ''), suggested: true }
+  }
+  const billCents = toCents(extraction.amount_due.value ?? null)
+  if (billCents !== null && billCents > 0) {
+    return { value: String(extraction.amount_due.value ?? ''), suggested: true }
+  }
+  return { value: '', suggested: true }
+}
+
 function InstallmentScheduleEditor({
   option,
+  obligationAction,
+  extraction,
   documentId,
   selectedOptionIndex,
   onSaved,
   onCancel,
 }: {
   option: PaymentOption
+  obligationAction: ProposedAction | undefined
+  extraction: DocumentExtraction
   documentId: string
   selectedOptionIndex: number
   onSaved: () => void
@@ -105,6 +129,9 @@ function InstallmentScheduleEditor({
   const [installments, setInstallments] = useState<DraftInstallment[]>(
     () => (option.installments ?? []).map((inst) => ({ ...inst })),
   )
+  const suggestion = suggestedPlanTotalInput(option, obligationAction, extraction)
+  const [planTotalInput, setPlanTotalInput] = useState<string>(suggestion.value)
+  const [planTotalSuggested, setPlanTotalSuggested] = useState<boolean>(suggestion.suggested && suggestion.value !== '')
   const [isPending, setIsPending] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
@@ -112,7 +139,11 @@ function InstallmentScheduleEditor({
     setInstallments((prev) => prev.map((inst, i) => (i === index ? { ...inst, ...patch } : inst)))
   }
 
-  const editValidation = validateInstallmentPlan({ option_type: 'installment_plan', amount: option.amount, installments })
+  const editValidation = validateInstallmentPlan({
+    option_type: 'installment_plan',
+    amount: planTotalInput,
+    installments,
+  })
 
   async function handleSave() {
     if (!editValidation.valid) return
@@ -121,6 +152,7 @@ function InstallmentScheduleEditor({
     const result = await saveCorrectedInstallmentSchedule(
       documentId,
       selectedOptionIndex,
+      planTotalInput,
       installments.map(({ amount, due_date }) => ({ amount, due_date })),
     )
     setIsPending(false)
@@ -133,6 +165,28 @@ function InstallmentScheduleEditor({
 
   return (
     <div className="space-y-3">
+      <div>
+        <label htmlFor="plan-total" className="block text-sm font-medium mb-1">
+          Plan total
+        </label>
+        <input
+          id="plan-total"
+          type="number"
+          step="0.01"
+          min="0.01"
+          value={planTotalInput}
+          onChange={(e) => {
+            setPlanTotalInput(e.target.value)
+            setPlanTotalSuggested(false)
+          }}
+          className="w-full rounded-md border px-2 py-1 text-sm"
+          aria-label="Plan total"
+        />
+        {planTotalSuggested && (
+          <p className="text-xs text-amber-700 mt-1">Suggested from the bill/obligation summary. Please verify against the source document.</p>
+        )}
+      </div>
+
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-foreground/60 border-b">
@@ -175,9 +229,13 @@ function InstallmentScheduleEditor({
       </table>
 
       <div className="text-sm space-y-1">
-        <p>
-          Plan total: {editValidation.planTotalFormatted} · Installment total: {editValidation.installmentTotalFormatted} · Difference: {editValidation.differenceFormatted}
-        </p>
+        {editValidation.planTotalCents !== null ? (
+          <p>
+            Plan total: {editValidation.planTotalFormatted} · Installment total: {editValidation.installmentTotalFormatted} · Difference: {editValidation.differenceFormatted}
+          </p>
+        ) : (
+          <p>Installment total: {editValidation.installmentTotalFormatted}</p>
+        )}
         {!editValidation.valid && <p className="text-red-600">{editValidation.error}</p>}
         {editError && <p className="text-red-600">{editError}</p>}
         <div className="flex flex-wrap gap-2 pt-1">
@@ -491,6 +549,8 @@ export function DocumentReviewForm({
                     <InstallmentScheduleEditor
                       key={`${effectiveSelectedOriginalIndex}-${currentFingerprint}`}
                       option={selectedOption}
+                      obligationAction={proposedObligation}
+                      extraction={extraction}
                       documentId={document.id}
                       selectedOptionIndex={effectiveSelectedOriginalIndex}
                       onSaved={handleScheduleSaved}
@@ -522,9 +582,13 @@ export function DocumentReviewForm({
                   {installmentValidation && !installmentValidation.valid && !isEditingSchedule && (
                     <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-900">
                       <p className="font-medium">Schedule cannot be confirmed</p>
-                      <p>
-                        Plan total {installmentValidation.planTotalFormatted} · Installment total {installmentValidation.installmentTotalFormatted} · Difference {installmentValidation.differenceFormatted}
-                      </p>
+                      {installmentValidation.planTotalCents !== null ? (
+                        <p>
+                          Plan total {installmentValidation.planTotalFormatted} · Installment total {installmentValidation.installmentTotalFormatted} · Difference {installmentValidation.differenceFormatted}
+                        </p>
+                      ) : (
+                        <p>Installment total: {installmentValidation.installmentTotalFormatted}</p>
+                      )}
                       <p>{installmentValidation.error}</p>
                       <p className="text-foreground/70">Edit and save the schedule before confirming.</p>
                     </div>

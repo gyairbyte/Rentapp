@@ -552,6 +552,7 @@ function isValidSelectedOptionIndex(value: unknown): value is number {
 export async function saveCorrectedInstallmentSchedule(
   documentId: string,
   selectedOptionIndex: number,
+  correctedPlanAmount: number | string | null | undefined,
   correctedInstallments: CorrectedInstallmentInput[],
 ): Promise<ActionResult> {
   const user = await requireUser()
@@ -586,9 +587,9 @@ export async function saveCorrectedInstallmentSchedule(
     return { error: 'Installment count cannot be changed' }
   }
 
-  const planCents = toCents(targetOption.amount)
+  const planCents = toCents(correctedPlanAmount)
   if (planCents === null || planCents <= 0) {
-    return { error: 'Plan amount is not valid' }
+    return { error: 'Plan total must be a positive money value valid to cents' }
   }
 
   let totalCents = 0
@@ -623,7 +624,13 @@ export async function saveCorrectedInstallmentSchedule(
     }
   }
 
-  const correctedOption: PaymentOption = { ...targetOption, installments: updatedInstallments }
+  const correctedPlanAmountNumber = Number((planCents / 100).toFixed(2))
+
+  const correctedOption: PaymentOption = {
+    ...targetOption,
+    amount: correctedPlanAmountNumber,
+    installments: updatedInstallments,
+  }
   const correctedPaymentOptions: PaymentOption[] = paymentOptions.map((opt, idx) =>
     idx === selectedOptionIndex ? correctedOption : opt,
   )
@@ -651,6 +658,7 @@ export async function saveCorrectedInstallmentSchedule(
       previous_run_id: run?.id ?? null,
       correction: {
         selected_option_index: selectedOptionIndex,
+        plan_amount: correctedPlanAmountNumber,
         installments: updatedInstallments.map(({ amount, due_date }) => ({ amount, due_date })),
       },
     },
