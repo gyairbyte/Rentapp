@@ -173,6 +173,26 @@ export type TaskInsert = Omit<Task, 'id' | 'created_at' | 'updated_at' | 'proper
   & Partial<Pick<Task, 'property_id' | 'party_id' | 'source_document_id' | 'description' | 'due_date' | 'priority'>>
 export type TaskUpdate = Partial<Omit<Task, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
 
+export type Repair = {
+  id: string
+  user_id: string
+  property_id: string
+  party_id: string | null
+  title: string
+  description: string | null
+  priority: string
+  status: string
+  reported_date: string
+  scheduled_date: string | null
+  completed_date: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type RepairInsert = Omit<Repair, 'id' | 'created_at' | 'updated_at' | 'description' | 'party_id' | 'scheduled_date' | 'completed_date'>
+  & Partial<Pick<Repair, 'description' | 'party_id' | 'scheduled_date' | 'completed_date'>>
+export type RepairUpdate = Partial<Omit<Repair, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+
 export type Document = {
   id: string
   user_id: string
@@ -303,6 +323,7 @@ export type Database = {
       documents: { Row: Document; Insert: DocumentInsert; Update: DocumentUpdate; Relationships: [] }
       document_processing_runs: { Row: DocumentProcessingRun; Insert: DocumentProcessingRunInsert; Update: Partial<DocumentProcessingRun>; Relationships: [] }
       tasks: { Row: Task; Insert: TaskInsert; Update: TaskUpdate; Relationships: [] }
+      repairs: { Row: Repair; Insert: RepairInsert; Update: RepairUpdate; Relationships: [] }
     }
     Views: Record<string, never>
     Functions: Record<string, never>

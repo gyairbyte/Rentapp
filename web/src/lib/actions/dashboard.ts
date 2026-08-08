@@ -5,8 +5,9 @@ import { requireUser } from './helpers'
 import { toISODate, addDays, startOfMonth, endOfMonth } from './dates'
 import { buildBillsFromObligations, getBillHref, toMoneyCents } from '@/lib/bills'
 import { labelFor } from '@/lib/utils'
+import { isRepairActive } from '@/lib/repairs'
 import { OBLIGATION_CATEGORIES } from '@/lib/constants'
-import type { Obligation, Property, Document, Task, Payment, Account, Party } from '@/lib/types'
+import type { Obligation, Property, Document, Task, Payment, Account, Party, Repair } from '@/lib/types'
 
 function isInMonth(dueDate: string, monthStart: string, monthEnd: string) {
   return dueDate >= monthStart && dueDate <= monthEnd
@@ -39,13 +40,14 @@ export async function getDashboardData() {
   const monthEnd = toISODate(endOfMonth(now))
   const inMonth = (dueDate: string) => isInMonth(dueDate, monthStart, monthEnd)
 
-  const [obligationsResult, propertiesResult, accountsResult, partiesResult, documentsResult, tasksResult] = await Promise.all([
+  const [obligationsResult, propertiesResult, accountsResult, partiesResult, documentsResult, tasksResult, repairsResult] = await Promise.all([
     supabase.from('obligations').select('*').eq('user_id', user.id).order('due_date', { ascending: true }).returns<Obligation[]>(),
     supabase.from('properties').select('*').eq('user_id', user.id).eq('archived', false).order('nickname', { ascending: true }).returns<Property[]>(),
     supabase.from('accounts').select('*').eq('user_id', user.id).returns<Account[]>(),
     supabase.from('parties').select('*').eq('user_id', user.id).returns<Party[]>(),
     supabase.from('documents').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).returns<Document[]>(),
     supabase.from('tasks').select('*').eq('user_id', user.id).order('due_date', { ascending: true, nullsFirst: false }).returns<Task[]>(),
+    supabase.from('repairs').select('*').eq('user_id', user.id).order('priority', { ascending: false }).order('reported_date', { ascending: false }).returns<Repair[]>(),
   ])
 
   if (obligationsResult.error) throw new Error(obligationsResult.error.message)
@@ -54,6 +56,7 @@ export async function getDashboardData() {
   if (partiesResult.error) throw new Error(partiesResult.error.message)
   if (documentsResult.error) throw new Error(documentsResult.error.message)
   if (tasksResult.error) throw new Error(tasksResult.error.message)
+  if (repairsResult.error) throw new Error(repairsResult.error.message)
 
   const obligations = (obligationsResult.data ?? []).filter((o) => !['canceled', 'waived'].includes(o.status))
   const propertiesRaw = propertiesResult.data ?? []
@@ -139,6 +142,10 @@ export async function getDashboardData() {
     .filter((b) => b.remaining_cents > 0 && b.earliest_due_date && b.earliest_due_date >= today && b.earliest_due_date <= nextMonth)
     .slice(0, 20)
 
+  const repairs = repairsResult.data ?? []
+  const activeRepairs = repairs.filter((r) => isRepairActive(r.status))
+  const urgentRepairs = activeRepairs.filter((r) => r.priority === 'urgent')
+
   const properties = propertiesRaw.map((property) => {
     const propertyObligations = obligations.filter((o) => o.property_id === property.id)
     const rent = propertyObligations.filter((o) => o.category === 'rent' && inMonth(o.due_date))
@@ -149,6 +156,7 @@ export async function getDashboardData() {
       0,
     )
     const open = propertyObligations.filter((o) => remainingCents(o.expected_amount, o.paid_amount, o.status) > 0).length
+    const propertyRepairs = activeRepairs.filter((r) => r.property_id === property.id)
 
     return {
       ...property,
@@ -157,6 +165,8 @@ export async function getDashboardData() {
       rentOutstandingCents: rentExpectedCents - rentReceivedCents,
       totalOutstandingCents,
       openObligations: open,
+      activeRepairCount: propertyRepairs.length,
+      urgentRepairCount: propertyRepairs.filter((r) => r.priority === 'urgent').length,
     }
   })
 
@@ -171,5 +181,8 @@ export async function getDashboardData() {
     properties,
     documents,
     tasks,
+    repairs,
+    activeRepairs,
+    urgentRepairs,
   }
 }

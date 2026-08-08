@@ -155,3 +155,18 @@ export const TASK_PRIORITIES = [
   { value: 'normal', label: 'Normal' },
   { value: 'high', label: 'High' },
 ]
+
+export const REPAIR_STATUSES = [
+  { value: 'reported', label: 'Reported' },
+  { value: 'evaluating', label: 'Evaluating' },
+  { value: 'assigned', label: 'Assigned' },
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'closed', label: 'Closed' },
+]
+
+export const REPAIR_PRIORITIES = [
+  { value: 'low', label: 'Low' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'urgent', label: 'Urgent' },
+]
