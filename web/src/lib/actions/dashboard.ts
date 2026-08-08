@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { requireUser } from './helpers'
 import { toISODate, addDays, startOfMonth, endOfMonth } from './dates'
+import { isTaskActive, sortTasks } from '@/lib/tasks'
 import { buildBillsFromObligations, getBillHref, toMoneyCents } from '@/lib/bills'
 import { labelFor } from '@/lib/utils'
 import { isRepairActive } from '@/lib/repairs'
@@ -63,10 +64,10 @@ export async function getDashboardData() {
   const accounts = accountsResult.data ?? []
   const parties = partiesResult.data ?? []
   const documents = documentsResult.data ?? []
-  const tasks = (tasksResult.data ?? [])
-    .filter((t) => !['completed', 'canceled'].includes(t.status))
-    .filter((t) => t.due_date === null || t.due_date <= nextWeek)
-    .slice(0, 10)
+  const tasks = sortTasks(
+    (tasksResult.data ?? []).filter((t) => isTaskActive(t.status)),
+    now,
+  ).slice(0, 10)
 
   const obligationIds = obligations.map((o) => o.id)
   const sourceDocumentIds = obligations.map((o) => o.source_document_id).filter((sid): sid is string => sid !== null)

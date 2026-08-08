@@ -7,9 +7,11 @@ import { getRecurringRulesForProperty } from '@/lib/actions/recurring'
 import { getDocumentsForProperty } from '@/lib/actions/documents'
 import { getPartiesForProperty } from '@/lib/actions/party'
 import { getRepairsForProperty } from '@/lib/actions/repairs'
+import { getTasksForProperty } from '@/lib/actions/tasks'
 import { ArchivePropertyButton } from '@/components/property/archive-property-button'
 import { labelFor } from '@/lib/utils'
 import { isRepairActive, isRepairResolved } from '@/lib/repairs'
+import { isTaskActive, isTaskResolved, isTaskOverdue, taskPriorityLabel, taskStatusLabel } from '@/lib/tasks'
 import { REPAIR_STATUSES, REPAIR_PRIORITIES } from '@/lib/constants'
 import { toISODate } from '@/lib/actions/dates'
 import { formatMoney, buildPropertySummary, toMoneyCents } from '@/lib/bills'
@@ -21,17 +23,20 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   const property = await getProperty(id)
   if (!property) notFound()
 
-  const [obligations, accounts, recurring, documents, parties, repairs] = await Promise.all([
+  const [obligations, accounts, recurring, documents, parties, repairs, tasks] = await Promise.all([
     getObligationsForProperty(id),
     getAccountsForProperty(id),
     getRecurringRulesForProperty(id),
     getDocumentsForProperty(id),
     getPartiesForProperty(id),
     getRepairsForProperty(id, { includeResolved: true }),
+    getTasksForProperty(id, { today: new Date() }),
   ])
 
   const activeRepairs = repairs.filter((r) => isRepairActive(r.status))
   const resolvedRepairs = repairs.filter((r) => isRepairResolved(r.status))
+  const activeTasks = tasks.filter((t) => isTaskActive(t.status))
+  const resolvedTasks = tasks.filter((t) => isTaskResolved(t.status))
 
   const today = toISODate(new Date())
 
@@ -75,6 +80,12 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
             className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90"
           >
             Add repair
+          </Link>
+          <Link
+            href={`/tasks/new?propertyId=${property.id}`}
+            className="rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium transition-opacity hover:opacity-90"
+          >
+            Add task
           </Link>
           <Link
             href={`/documents/capture?propertyId=${property.id}`}
@@ -249,6 +260,60 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
           </ul>
         )}
       </section>
+
+      <section>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">
+            Active tasks
+            {activeTasks.some((t) => ['urgent', 'high'].includes(t.priority ?? '')) && (
+              <span className="ml-2 inline-block rounded-full bg-red-50 text-red-600 px-2 py-0.5 text-xs border border-red-200">
+                urgent
+              </span>
+            )}
+          </h2>
+          <Link href={`/tasks?propertyId=${property.id}`} className="text-sm underline">
+            View all
+          </Link>
+        </div>
+        {activeTasks.length === 0 ? (
+          <p className="text-foreground/70">No active tasks.</p>
+        ) : (
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {activeTasks.map((task) => (
+              <li key={task.id} className="rounded-lg border p-3">
+                <Link href={`/tasks/${task.id}`} className="font-medium hover:underline">
+                  {task.title}
+                </Link>
+                <p className="text-sm text-foreground/70">
+                  {taskStatusLabel(task.status)} ·{' '}
+                  <span className={task.priority === 'urgent' ? 'font-semibold text-red-600' : ''}>
+                    {taskPriorityLabel(task.priority ?? '')}
+                  </span>
+                  {isTaskOverdue(task, today) && <span className="ml-1 font-semibold text-red-600">· Overdue</span>}
+                  {task.due_date && !isTaskOverdue(task, today) && ` · due ${task.due_date}`}
+                  {!task.due_date && ' · no due date'}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {resolvedTasks.length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold mb-2">Task history</h2>
+          <ul className="grid gap-2 sm:grid-cols-2 opacity-70">
+            {resolvedTasks.map((task) => (
+              <li key={task.id} className="rounded-lg border p-3">
+                <Link href={`/tasks/${task.id}`} className="font-medium hover:underline">
+                  {task.title}
+                </Link>
+                <p className="text-sm text-foreground/70">{taskStatusLabel(task.status)}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section>
         <div className="flex items-center justify-between mb-2">

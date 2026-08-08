@@ -3,6 +3,8 @@ import { getDashboardData } from '@/lib/actions/dashboard'
 import { labelFor } from '@/lib/utils'
 import { OBLIGATION_STATUSES, REPAIR_STATUSES, REPAIR_PRIORITIES } from '@/lib/constants'
 import { formatMoney, formatDueDate, getBillHref } from '@/lib/bills'
+import { isTaskOverdue, isTaskDueToday, isTaskUnscheduled, taskPriorityLabel } from '@/lib/tasks'
+import { formatDateOnly } from '@/lib/actions/dates'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,19 +117,40 @@ export default async function DashboardPage() {
             }))}
             empty="No failed processing"
           />
-          <AttentionCard
-            title="Tasks due"
-            items={data.tasks.map((t) => ({
-              id: t.id,
-              description: t.title,
-              category: 'Task',
-              due_date: t.due_date ?? '',
-              expected_amount: 0,
-              paid_amount: 0,
-              href: `/tasks/${t.id}`,
-            }))}
-            empty="No tasks due soon"
-          />
+          <div className="rounded-lg border p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-medium">Tasks due</h3>
+              <Link href="/tasks" className="text-xs underline">
+                View all tasks
+              </Link>
+            </div>
+            {data.tasks.length === 0 ? (
+              <p className="text-sm text-foreground/70">No active tasks.</p>
+            ) : (
+              <ul className="space-y-2">
+                {data.tasks.map((t) => {
+                  const overdue = isTaskOverdue(t, new Date())
+                  const dueToday = isTaskDueToday(t, new Date())
+                  const unscheduled = isTaskUnscheduled(t)
+                  return (
+                    <li key={t.id}>
+                      <Link href={`/tasks/${t.id}`} className="text-sm hover:underline">
+                        {t.title}
+                      </Link>
+                      <p className="text-sm text-foreground/70">
+                        {overdue && <span className="font-semibold text-red-600">Overdue</span>}
+                        {dueToday && <span className="font-semibold text-amber-700">Due today</span>}
+                        {t.due_date && !overdue && !dueToday && `Due ${formatDateOnly(t.due_date)}`}
+                        {unscheduled && 'No due date'}
+                        {' · '}
+                        <span className={priorityClass(t.priority)}>{taskPriorityLabel(t.priority ?? '')}</span>
+                      </p>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
         </div>
       </section>
 
@@ -276,4 +299,11 @@ function StatusBadge({ status }: { status: string }) {
       {labelFor(status, OBLIGATION_STATUSES)}
     </span>
   )
+}
+
+function priorityClass(priority: string | null): string {
+  if (priority === 'urgent') return 'font-semibold text-red-600'
+  if (priority === 'high') return 'font-semibold text-amber-700'
+  if (priority === 'normal') return 'text-foreground'
+  return 'text-foreground/70'
 }

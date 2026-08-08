@@ -9,7 +9,8 @@ const actions = [
   { href: '/recurring/new', label: 'Add recurring obligation', description: 'Set up monthly rent, quarterly water, etc.' },
   { href: '/parties/new', label: 'Add party / provider', description: 'Add a tenant, utility, contractor, or authority.' },
   { href: '/documents/new', label: 'Scan / upload document', description: 'Take a photo or upload a PDF for AI extraction.' },
-  { href: '/obligations/new?category=contractor_invoice', label: 'Add repair / task', description: 'Repair/work order tracking is a future feature.', comingSoon: true },
+  { href: '/repairs/new', label: 'Add repair / work order', description: 'Record something broken and track it through completion.' },
+  { href: '/tasks/new', label: 'Add task / deadline', description: 'Create a property task or reminder with a due date.' },
 ]
 
 export default function AddPage() {
@@ -21,13 +22,10 @@ export default function AddPage() {
           <Link
             key={action.href}
             href={action.href}
-            className={`rounded-lg border p-4 hover:border-foreground/50 transition-colors ${
-              action.comingSoon ? 'opacity-70' : ''
-            }`}
+            className="rounded-lg border p-4 hover:border-foreground/50 transition-colors"
           >
             <div className="font-semibold">{action.label}</div>
             <p className="text-sm text-foreground/70 mt-1">{action.description}</p>
-            {action.comingSoon && <span className="text-xs text-foreground/50 mt-2 inline-block">Placeholder</span>}
           </Link>
         ))}
       </div>

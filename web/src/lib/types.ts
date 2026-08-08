@@ -165,12 +165,13 @@ export type Task = {
   due_date: string | null
   status: string
   priority: string | null
+  completed_at: string | null
   created_at: string
   updated_at: string
 }
 
 export type TaskInsert = Omit<Task, 'id' | 'created_at' | 'updated_at' | 'property_id' | 'party_id' | 'source_document_id' | 'description' | 'due_date' | 'priority'>
-  & Partial<Pick<Task, 'property_id' | 'party_id' | 'source_document_id' | 'description' | 'due_date' | 'priority'>>
+  & Partial<Pick<Task, 'property_id' | 'party_id' | 'source_document_id' | 'description' | 'due_date' | 'priority' | 'completed_at'>>
 export type TaskUpdate = Partial<Omit<Task, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
 
 export type Repair = {

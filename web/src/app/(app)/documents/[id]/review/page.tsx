@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { getDocumentWithDetails } from '@/lib/actions/documents'
 import { getSignedDocumentUrl } from '@/lib/actions/documents'
+import { getTaskByDocumentId } from '@/lib/actions/tasks'
 import { DocumentReviewForm } from '@/components/document/document-review-form'
 import { DocumentProcessingFailed } from '@/components/document/document-processing-failed'
 import { getDocumentReviewState } from '@/lib/document-review-state'
@@ -14,7 +15,10 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
   if (!details) notFound()
 
   const { document, extraction, run, proposedMatch, properties, accounts, parties, duplicates } = details
-  const signedUrl = await getSignedDocumentUrl(document.storage_path)
+  const [signedUrl, linkedTask] = await Promise.all([
+    getSignedDocumentUrl(document.storage_path),
+    getTaskByDocumentId(id),
+  ])
   const state = getDocumentReviewState(document, run, process.env.NODE_ENV === 'development')
 
   return (
@@ -57,6 +61,7 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
           accounts={accounts}
           parties={parties}
           duplicates={duplicates}
+          linkedTask={linkedTask}
         />
       ) : (
         <p className="text-foreground/70">{state.userMessage}</p>
