@@ -1,5 +1,6 @@
 import { type ZodError } from 'zod'
 import { toISODate, addDays } from './actions/dates'
+import { toCents } from './payment-validation'
 
 export function getURL() {
   let url =
@@ -24,6 +25,10 @@ export function labelFor(value: string, options: { value: string; label: string 
   return options.find((o) => o.value === value)?.label ?? value.replace(/_/g, ' ')
 }
 
+function toMoneyCents(amount: number | string | null | undefined): number {
+  return toCents(amount ?? 0) ?? 0
+}
+
 export function recalcObligation(
   paidAmount: number,
   expectedAmount: number,
@@ -34,8 +39,11 @@ export function recalcObligation(
     return currentStatus
   }
 
-  if (paidAmount >= expectedAmount) return 'paid'
-  if (paidAmount > 0) return 'partially_paid'
+  const paidCents = toMoneyCents(paidAmount)
+  const expectedCents = toMoneyCents(expectedAmount)
+
+  if (paidCents >= expectedCents) return 'paid'
+  if (paidCents > 0) return 'partially_paid'
 
   const today = toISODate(new Date())
   if (dueDate < today) return 'overdue'
@@ -48,10 +56,11 @@ export function calculatePaidDate(
   expectedAmount: number
 ): string | null {
   const sorted = [...payments].sort((a, b) => a.payment_date.localeCompare(b.payment_date))
+  const expectedCents = toMoneyCents(expectedAmount)
   let cumulative = 0
   for (const payment of sorted) {
-    cumulative += payment.amount
-    if (cumulative >= expectedAmount) {
+    cumulative += toMoneyCents(payment.amount)
+    if (cumulative >= expectedCents) {
       return payment.payment_date
     }
   }

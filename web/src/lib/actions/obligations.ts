@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { obligationSchema } from '@/lib/validations/obligation'
 import { requireUser } from './helpers'
 import { formatZodErrors, recalcObligation, calculatePaidDate } from '@/lib/utils'
+import { toMoneyCents } from '@/lib/bills'
 import type { Obligation, Payment } from '@/lib/types'
 
 type ActionResult =
@@ -178,7 +179,9 @@ export async function syncObligationPayments(obligationId: string) {
 
   if (payError) throw new Error(payError.message)
 
-  const paidAmount = (payments ?? []).reduce((sum, p) => sum + (p.amount ?? 0), 0)
+  // Sum payments in integer cents to avoid binary floating-point drift.
+  const paidCents = (payments ?? []).reduce((sum, p) => sum + toMoneyCents(p.amount), 0)
+  const paidAmount = paidCents / 100
   const status = recalcObligation(paidAmount, obligation.expected_amount, obligation.due_date, obligation.status)
   const paidDate = calculatePaidDate(payments ?? [], obligation.expected_amount)
 

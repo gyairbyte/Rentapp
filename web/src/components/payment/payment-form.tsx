@@ -11,14 +11,24 @@ type PaymentFormProps = {
   payment?: Payment | null
   obligations: { id: string; description: string | null; expected_amount: number; paid_amount: number; due_date: string }[]
   defaultObligationId?: string
+  defaultAmount?: number
+  returnUrl?: string
   action: (formData: FormData) => Promise<{ success: true } | { error: string; errors?: Record<string, string[]> }>
 }
 
-export function PaymentForm({ payment, obligations, defaultObligationId, action }: PaymentFormProps) {
+export function PaymentForm({
+  payment,
+  obligations,
+  defaultObligationId,
+  defaultAmount,
+  returnUrl,
+  action,
+}: PaymentFormProps) {
   const router = useRouter()
   const { formAction, error, fieldErrors, isPending } = useFormAction(action, {
     onSuccess: () => {
-      router.push('/obligations')
+      const safeReturn = returnUrl && returnUrl.startsWith('/') && !returnUrl.startsWith('//') ? returnUrl : null
+      router.push(safeReturn ?? '/obligations')
       router.refresh()
     },
   })
@@ -28,6 +38,8 @@ export function PaymentForm({ payment, obligations, defaultObligationId, action 
   const remaining = selectedObligation
     ? selectedObligation.expected_amount - selectedObligation.paid_amount
     : 0
+
+  const amountDefault = payment?.amount ?? defaultAmount ?? remaining
 
   return (
     <form action={formAction} className="max-w-xl space-y-4">
@@ -53,7 +65,7 @@ export function PaymentForm({ payment, obligations, defaultObligationId, action 
         type="number"
         step="0.01"
         min="0"
-        defaultValue={payment?.amount ?? ''}
+        defaultValue={amountDefault > 0 ? amountDefault : ''}
         error={fieldErrors.amount?.[0]}
         required
       />
@@ -94,7 +106,7 @@ export function PaymentForm({ payment, obligations, defaultObligationId, action 
           {isPending ? 'Saving…' : payment ? 'Save changes' : 'Record payment'}
         </button>
         <Link
-          href="/obligations"
+          href={returnUrl && returnUrl.startsWith('/') && !returnUrl.startsWith('//') ? returnUrl : '/obligations'}
           className="rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:bg-foreground/10"
         >
           Cancel
