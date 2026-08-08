@@ -16,7 +16,7 @@ create or replace function public.confirm_document(
   p_due_date date default null,
   p_period_start date default null,
   p_period_end date default null,
-  p_amount numeric(12,2) default null,
+  p_amount numeric default null,
   p_direction text default 'payable',
   p_category text default 'other',
   p_description text default null,
@@ -49,6 +49,8 @@ declare
   v_option_type text;
   v_existing_obligations uuid[];
   v_plan_amount numeric(12,2);
+  v_plan_amount_raw numeric;
+  v_amount_raw numeric;
   v_plan_cents bigint;
   v_total_cents bigint := 0;
   v_inst_cents bigint;
@@ -121,15 +123,19 @@ begin
 
     if v_option_type = 'installment_plan' then
       begin
-        v_plan_amount := (v_option->>'amount')::numeric(12,2);
+        v_plan_amount_raw := (v_option->>'amount')::numeric;
       exception when others then
         raise exception 'Installment plan amount is missing or invalid' using errcode = 'P0001';
       end;
 
-      if v_plan_amount is null or v_plan_amount <= 0 then
+      if v_plan_amount_raw is null or v_plan_amount_raw <= 0 then
         raise exception 'Installment plan amount must be greater than zero' using errcode = 'P0001';
       end if;
+      if v_plan_amount_raw <> trunc(v_plan_amount_raw, 2) then
+        raise exception 'Installment plan amount must be valid to cents' using errcode = 'P0001';
+      end if;
 
+      v_plan_amount := v_plan_amount_raw::numeric(12,2);
       v_plan_cents := (v_plan_amount * 100)::bigint;
       v_total_cents := 0;
 
@@ -142,19 +148,23 @@ begin
       for v_i in 0..v_count - 1 loop
         v_inst := v_installments->v_i;
         begin
-          v_amount := (v_inst->>'amount')::numeric(12,2);
+          v_amount_raw := (v_inst->>'amount')::numeric;
           v_due_date := (v_inst->>'due_date')::date;
         exception when others then
           raise exception 'Installment % has invalid amount or due date', (v_i + 1) using errcode = 'P0001';
         end;
 
-        if v_amount is null or v_amount <= 0 then
+        if v_amount_raw is null or v_amount_raw <= 0 then
           raise exception 'Installment % amount must be greater than zero', (v_i + 1) using errcode = 'P0001';
+        end if;
+        if v_amount_raw <> trunc(v_amount_raw, 2) then
+          raise exception 'Installment % amount must be valid to cents', (v_i + 1) using errcode = 'P0001';
         end if;
         if v_due_date is null then
           raise exception 'Installment % due date is required', (v_i + 1) using errcode = 'P0001';
         end if;
 
+        v_amount := v_amount_raw::numeric(12,2);
         v_inst_cents := (v_amount * 100)::bigint;
         v_total_cents := v_total_cents + v_inst_cents;
 
@@ -199,15 +209,20 @@ begin
       end if;
     else
       begin
-        v_amount := (v_option->>'amount')::numeric(12,2);
+        v_amount_raw := (v_option->>'amount')::numeric;
         v_due_date := (v_option->>'due_date')::date;
       exception when others then
         raise exception 'Selected payment option has invalid amount or due date' using errcode = 'P0001';
       end;
 
-      if v_amount is null or v_amount <= 0 then
+      if v_amount_raw is null or v_amount_raw <= 0 then
         raise exception 'Selected payment option amount must be greater than zero' using errcode = 'P0001';
       end if;
+      if v_amount_raw <> trunc(v_amount_raw, 2) then
+        raise exception 'Selected payment option amount must be valid to cents' using errcode = 'P0001';
+      end if;
+
+      v_amount := v_amount_raw::numeric(12,2);
       if v_due_date is null then
         raise exception 'Selected payment option due date is required' using errcode = 'P0001';
       end if;
@@ -253,6 +268,9 @@ begin
   if not v_has_obligations then
     if p_amount is null or p_amount <= 0 or p_due_date is null then
       raise exception 'Amount and due date are required to create an obligation' using errcode = 'P0001';
+    end if;
+    if p_amount <> trunc(p_amount, 2) then
+      raise exception 'Amount must be valid to cents' using errcode = 'P0001';
     end if;
 
     v_status := case

@@ -532,6 +532,79 @@ describeDb('confirm_document multi-payment behavior', () => {
     expect(rows[3].source_item_key).toBe('option_2:installment_4')
   })
 
+  it('rejects a plan amount with more than two decimal places', async () => {
+    const documentId = await createTestDocument(client, ctx.userId, {})
+    const badOptions = [
+      {
+        option_type: 'installment_plan',
+        amount: 100.005,
+        due_date: '2026-10-31',
+        description: 'Bad precision plan',
+        discount_amount: null,
+        penalty_amount: null,
+        penalty_date: null,
+        late_payment_terms: [],
+        installments: [
+          { amount: 50, due_date: '2026-08-03', description: 'Half', late_payment_terms: [] },
+          { amount: 50.01, due_date: '2026-09-14', description: 'Half+cent', late_payment_terms: [] },
+        ],
+      },
+    ]
+
+    await expect(
+      callConfirm(client, ctx.userId, documentId, ctx.propertyId, {
+        payment_options: badOptions,
+        selected_payment_option_index: 0,
+      }),
+    ).rejects.toThrow('valid to cents')
+
+    const { rows } = await client.query<{ count: number }>(
+      'select count(*)::int as count from public.obligations where source_document_id = $1',
+      [documentId],
+    )
+    expect(rows[0].count).toBe(0)
+
+    const { rows: docs } = await client.query(
+      'select review_status from public.documents where id = $1',
+      [documentId],
+    )
+    expect(docs[0].review_status).not.toBe('confirmed')
+  })
+
+  it('rejects an installment amount with more than two decimal places', async () => {
+    const documentId = await createTestDocument(client, ctx.userId, {})
+    const badOptions = [
+      {
+        option_type: 'installment_plan',
+        amount: 100,
+        due_date: '2026-10-31',
+        description: 'Bad installment precision',
+        discount_amount: null,
+        penalty_amount: null,
+        penalty_date: null,
+        late_payment_terms: [],
+        installments: [
+          { amount: 33.335, due_date: '2026-08-03', description: 'Third', late_payment_terms: [] },
+          { amount: 33.33, due_date: '2026-09-14', description: 'Third', late_payment_terms: [] },
+          { amount: 33.34, due_date: '2026-10-31', description: 'Third', late_payment_terms: [] },
+        ],
+      },
+    ]
+
+    await expect(
+      callConfirm(client, ctx.userId, documentId, ctx.propertyId, {
+        payment_options: badOptions,
+        selected_payment_option_index: 0,
+      }),
+    ).rejects.toThrow('valid to cents')
+
+    const { rows } = await client.query<{ count: number }>(
+      'select count(*)::int as count from public.obligations where source_document_id = $1',
+      [documentId],
+    )
+    expect(rows[0].count).toBe(0)
+  })
+
   it('upgrades from migration 008 to 009 and rejects an unbalanced schedule', async () => {
     await setAuthUser(client, ctx.userId)
     const migrationsDir = join(process.cwd(), 'supabase', 'migrations')

@@ -23,7 +23,7 @@ import {
   validateInstallmentPlan,
   formatLatePaymentTerm,
 } from '@/lib/payment-validation'
-import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentInstallment } from '@/lib/types'
+import type { Document, DocumentExtraction, DocumentMatch, PaymentOption, PaymentTerm } from '@/lib/types'
 import type { DuplicateResult } from '@/lib/document-intelligence/duplicates'
 
 function formatCurrency(amount: number | null) {
@@ -66,7 +66,14 @@ function allLatePaymentTerms(option: PaymentOption | undefined) {
   return terms
 }
 
-function installmentLateDisplay(inst: PaymentInstallment): string {
+type DraftInstallment = {
+  amount: number | string | null
+  due_date: string | null
+  description?: string | null
+  late_payment_terms?: PaymentTerm[]
+}
+
+function installmentLateDisplay(inst: DraftInstallment): string {
   const baseCents = toCents(inst.amount)
   const lateTerms = inst.late_payment_terms ?? []
   if (baseCents === null || lateTerms.length === 0) return '—'
@@ -95,17 +102,17 @@ function InstallmentScheduleEditor({
   onSaved: () => void
   onCancel: () => void
 }) {
-  const [installments, setInstallments] = useState<PaymentInstallment[]>(
+  const [installments, setInstallments] = useState<DraftInstallment[]>(
     () => (option.installments ?? []).map((inst) => ({ ...inst })),
   )
   const [isPending, setIsPending] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
-  function updateInstallment(index: number, patch: Partial<PaymentInstallment>) {
+  function updateInstallment(index: number, patch: Partial<DraftInstallment>) {
     setInstallments((prev) => prev.map((inst, i) => (i === index ? { ...inst, ...patch } : inst)))
   }
 
-  const editValidation = validateInstallmentPlan({ ...option, installments })
+  const editValidation = validateInstallmentPlan({ option_type: 'installment_plan', amount: option.amount, installments })
 
   async function handleSave() {
     if (!editValidation.valid) return
@@ -146,7 +153,7 @@ function InstallmentScheduleEditor({
                   min="0.01"
                   value={inst.amount ?? ''}
                   onChange={(e) =>
-                    updateInstallment(i, { amount: e.target.value === '' ? null : Number(e.target.value) })
+                    updateInstallment(i, { amount: e.target.value === '' ? null : e.target.value })
                   }
                   className="w-full rounded-md border px-2 py-1 text-sm"
                   aria-label={`Installment ${i + 1} amount`}

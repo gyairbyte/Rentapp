@@ -56,11 +56,18 @@ describe('toCents', () => {
     expect(toCents('')).toBeNull()
   })
 
-  it('rounds number inputs safely to the nearest cent', () => {
+  it('accepts number inputs that are exact to cents', () => {
     expect(toCents(1756.51)).toBe(175651)
     expect(toCents(439.13)).toBe(43913)
     expect(toCents(439.12)).toBe(43912)
-    expect(toCents(0.295)).toBe(30)
+    expect(toCents(0.1)).toBe(10)
+    expect(toCents(0.20)).toBe(20)
+  })
+
+  it('rejects number inputs with more than two decimal places', () => {
+    expect(toCents(439.125)).toBeNull()
+    expect(toCents(0.295)).toBeNull()
+    expect(toCents(1756.519)).toBeNull()
   })
 })
 

@@ -37,7 +37,12 @@ export function toCents(value: number | string | null | undefined): number | nul
 
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) return null
-    return Math.round(value * 100)
+    const scaled = value * 100
+    const rounded = Math.round(scaled)
+    // Reject amounts with precision finer than one cent instead of silently
+    // rounding them into validity.
+    if (Math.abs(scaled - rounded) > 0.0001) return null
+    return rounded
   }
 
   const str = String(value).trim()
@@ -71,7 +76,22 @@ export function roundCents(value: number): number {
   return Math.round(value)
 }
 
-export function validateInstallmentPlan(option: PaymentOption | null | undefined): InstallmentPlanValidationResult {
+type InstallmentLike = {
+  amount: number | string | null
+  due_date: string | null
+  description?: string | null
+  late_payment_terms?: PaymentTerm[]
+}
+
+type InstallmentPlanLike = {
+  option_type: 'installment_plan'
+  amount: number | string | null
+  installments: InstallmentLike[] | null | undefined
+  description?: string | null
+  late_payment_terms?: PaymentTerm[]
+}
+
+export function validateInstallmentPlan(option: PaymentOption | InstallmentPlanLike | null | undefined): InstallmentPlanValidationResult {
   const empty: InstallmentPlanValidationResult = {
     valid: false,
     planTotalCents: null,

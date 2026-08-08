@@ -473,7 +473,7 @@ export async function confirmDocument(documentId: string, formData: FormData): P
       return { error: 'A payment option must be selected' }
     }
     const index = Number(selectedPaymentOptionIndexRaw)
-    if (Number.isNaN(index) || index < 0 || index >= paymentOptions.length) {
+    if (!Number.isFinite(index) || !Number.isInteger(index) || index < 0 || index >= paymentOptions.length) {
       return { error: 'Invalid payment option selection' }
     }
     const selected = paymentOptions[index]
@@ -545,6 +545,10 @@ export type CorrectedInstallmentInput = {
   due_date: string | null | undefined
 }
 
+function isValidSelectedOptionIndex(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)
+}
+
 export async function saveCorrectedInstallmentSchedule(
   documentId: string,
   selectedOptionIndex: number,
@@ -561,13 +565,14 @@ export async function saveCorrectedInstallmentSchedule(
     return { error: 'Cannot edit the schedule of a confirmed document' }
   }
 
-  const obligationAction = extraction.proposed_actions.find((a) => a.type === 'obligation')
-  if (!obligationAction) {
+  const obligationActionIndex = extraction.proposed_actions.findIndex((a) => a.type === 'obligation')
+  if (obligationActionIndex === -1) {
     return { error: 'No obligation action found in extraction' }
   }
+  const obligationAction = extraction.proposed_actions[obligationActionIndex]
   const paymentOptions = obligationAction.payment_options
 
-  if (selectedOptionIndex < 0 || selectedOptionIndex >= paymentOptions.length) {
+  if (!isValidSelectedOptionIndex(selectedOptionIndex) || selectedOptionIndex < 0 || selectedOptionIndex >= paymentOptions.length) {
     return { error: 'Invalid payment option selection' }
   }
 
@@ -630,8 +635,8 @@ export async function saveCorrectedInstallmentSchedule(
 
   const correctedExtraction: DocumentExtraction = {
     ...extraction,
-    proposed_actions: extraction.proposed_actions.map((action) =>
-      action.type === 'obligation' ? correctedObligationAction : action,
+    proposed_actions: extraction.proposed_actions.map((action, idx) =>
+      idx === obligationActionIndex ? correctedObligationAction : action,
     ),
   }
 
@@ -656,15 +661,10 @@ export async function saveCorrectedInstallmentSchedule(
     return { error: `Could not save corrected schedule: ${runError.message}` }
   }
 
-  const { error: docError } = await supabase
-    .from('documents')
-    .update({ raw_ai_extraction: JSON.stringify(correctedExtraction) })
-    .eq('id', documentId)
-    .eq('user_id', user.id)
-
-  if (docError) {
-    return { error: `Could not update document: ${docError.message}` }
-  }
+  // The correction run is the single authoritative write; loaders prefer the
+  // latest processing run. We intentionally do not overwrite the legacy
+  // raw_ai_extraction field so the original AI evidence remains intact and
+  // success/failure is unambiguous.
 
   revalidatePath('/documents')
   revalidatePath('/inbox')

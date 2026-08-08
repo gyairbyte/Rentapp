@@ -474,7 +474,7 @@ describe('DocumentReviewForm payment selection', () => {
         'd-1',
         0,
         expect.arrayContaining([
-          expect.objectContaining({ amount: 439.12, due_date: '2026-12-07' }),
+          expect.objectContaining({ amount: '439.12', due_date: '2026-12-07' }),
         ]),
       )
     })
